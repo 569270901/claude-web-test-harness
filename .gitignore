@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# Playwright / 测试产物
+test-results/
+playwright-report/
+data/debug/
+
+# 编辑器
+.idea/
+.vscode/
+.DS_Store

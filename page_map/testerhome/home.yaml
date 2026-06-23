@@ -1,0 +1,24 @@
+# TesterHome 首页页面地图（示例 / 种子）
+# 这是手写的最小种子，演示 page_map 结构。
+# 让 page-map-sync agent 实地探索后会全量覆写、补全更多元素。
+page: Home
+url: https://testerhome.com
+landmark:
+  selector: 'a[href*="/topics/"]'
+  description: 首页话题列表里指向帖子详情的链接（页面唯一标识）
+entry:
+  from: external
+  trigger: 直接访问站点根路径
+  selector: null
+elements:
+  link_topic:
+    selector: 'a[href*="/topics/"]'
+    description: 话题标题链接，点击进入帖子详情页
+  nav_search:
+    selector: 'a[href*="/search"]'
+    description: 顶部搜索入口
+  nav_topics:
+    selector: 'a[href$="/topics"]'
+    description: 话题列表导航
+tabs: {}
+modals: {}

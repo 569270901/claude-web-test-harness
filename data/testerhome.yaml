@@ -1,0 +1,13 @@
+# TesterHome demo 测试数据（示例）
+site: TesterHome
+base_url: https://testerhome.com
+
+# 搜索流程用例数据
+search:
+  keyword: "appium"
+  # 搜索结果页里应当出现的子串（断言用，避免精确匹配）
+  expect_results_contain: "appium"
+
+# 首页断言用
+home:
+  expect_title_contains: "TesterHome"
