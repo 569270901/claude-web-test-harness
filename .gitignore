@@ -10,6 +10,10 @@ test-results/
 playwright-report/
 data/debug/
 
+# 运行日志（任务级，只增不改，本地取证用，不入库）
+artifacts/*/journal.jsonl
+.claude/journal_task
+
 # 编辑器
 .idea/
 .vscode/

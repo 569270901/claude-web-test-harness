@@ -32,6 +32,14 @@ tools: Read, Grep, Glob, Write, Edit, Bash
 - ❌ 不替用户决定用例够不够——一律 pending_review
 - 步骤要含可执行动作，期望必须可断言（不写"正常显示"）
 
+## 运行日志 journal（叙事层）
+
+每个 page_ref 缺口判断（标依赖 vs 不编造）记一条 decide（客观层由 hook 自动记）：
+```bash
+python3 scripts/journal.py log --actor test-case-design --action decide --why "需求要 X，page_map 无此元素 → 标依赖待 page-map-sync"
+```
+详见 `artifacts/README.md` 的「运行日志 Journal」一节。
+
 ## 任务参数
 
 需求内容、范围由 orchestrator 在 prompt 中给出。

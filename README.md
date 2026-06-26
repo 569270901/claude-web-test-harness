@@ -26,10 +26,39 @@
 
 ---
 
-## 前提：依赖 Claude Code
+## 前提：一个能跑 agent 的编码工具（首选 Claude Code）
 
-这套 harness 的「执行引擎」就是 Claude Code 本身——子 agent 派发（`.claude/agents/`）、Skill / Agent 工具、artifact 接力都跑在 Claude Code 里。
-**没有 Claude Code，这个仓库只是一堆 markdown + 一个普通的 pytest-playwright 工程。** 接入前请确认你在用 Claude Code。
+这套 harness 的「执行引擎」是一个 **agentic 编码工具**——它负责扮演 orchestrator、调度各角色、读写 artifact、跑测试。
+本身的机制（角色规范 `artifacts/agents/*.md`、artifact schema、流水线、`page_map`/`data`/`tests` 约定）就是 **markdown + 一个普通的 pytest-playwright 工程**，不绑死任何一家工具。
+
+### 用 Claude Code（原生支持，开箱即用）
+
+Claude Code 能直接读 `.claude/agents/`（子 agent 定义）和 `CLAUDE.md`（项目约定），原生做**隔离子 agent 派发**，所以零配置就能跑。下面「快速开始」就是 Claude Code 的流程。
+
+### 用 Codex / CodeBuddy / 其他 agent 工具（喂一段兼容 prompt）
+
+其他工具没有 Claude Code 的子 agent 派发和 `CLAUDE.md` 自动加载机制，但 harness 的角色规范都是纯 markdown，可以让**单个 agent 读规范、按顺序扮演各角色**来模拟整条流水线。把下面这段 prompt 喂给它即可：
+
+```text
+你是这个仓库的测试编排 orchestrator。先读这几份文件理解机制：
+- artifacts/README.md（编排规范：artifact schema、状态枚举、gate、红线、progress.log）
+- artifacts/agents/ 下全部角色规范（orchestrator / page-map-sync / test-case-design / test-writing / review）
+- CLAUDE.md（项目约定：站点 URL、目录、登录、开发原则）
+- rule.md（selector 写法等技术红线）
+
+然后按这条流水线依次执行（你没有隔离子 agent，就在当前上下文里逐个扮演每个角色）：
+page-map-sync → test-case-design →（停下来等我审核 cases.md）→ test-writing → review
+
+严格遵守：
+1. 每个角色产出对应 artifact，带完整 frontmatter（schema 见 artifacts/README.md）
+2. cases.md 产出后 status=pending_review，必须停下等我确认，不准跳过这个 gate
+3. 关键阶段 append 一行到 artifacts/<task_id>/progress.log
+4. 绝不删断言来让测试通过；selector 禁用 hash class / :nth-child / xpath 位置索引
+
+我的需求是：<在这里写你要测什么>
+```
+
+> 注意：非 Claude Code 工具是「单上下文模拟多角色」，没有真正的进程隔离，长任务上下文容易串味；建议一次只跑一条流水线、勤看 `progress.log`。能力够强的 agent 工具都能跑，效果取决于工具本身。
 
 ---
 
@@ -140,11 +169,12 @@ artifacts/agents/      5 个角色规范（含 orchestrator）
 page_map/              页面地图（YAML，描述当前部署的页面元素/selector）
 data/                  测试数据
 tests/                 测试代码
+scripts/journal.py     运行日志：hook 客观记录 + agent 叙事「为什么」，用于复盘 agent 行为
 CLAUDE.md              项目约定（接入方在此声明自己的目录/命令/登录）
 rule.md                技术避坑（selector 写法、等待时机）
 ```
 
-每跑一个任务会在 `artifacts/<task_id>/` 下归档 `state.md` / `sync.md` / `cases.md` / `impl.md` / `review.md` / `progress.log`。
+每跑一个任务会在 `artifacts/<task_id>/` 下归档 `state.md` / `sync.md` / `cases.md` / `impl.md` / `review.md` / `progress.log` / `journal.jsonl`（运行日志，见 `artifacts/README.md`「运行日志 Journal」）。
 
 ---
 

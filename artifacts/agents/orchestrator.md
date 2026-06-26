@@ -42,6 +42,24 @@ echo "[$(date +'%Y-%m-%d %H:%M:%S')] orchestrator <event>" >> artifacts/<task_id
 ```
 详见 `artifacts/README.md` 的 Progress Log 一节。
 
+## 必写 journal（运行日志）
+
+详见 `artifacts/README.md` 的「运行日志 Journal」一节。orchestrator 两件事必做：
+
+1. **任务起手写 task 指针**（决定 hook 客观层写哪个任务目录；没有指针就不记）：
+   ```bash
+   echo "<task_id>" > .claude/journal_task
+   ```
+   **任务终态（completed/blocked/failed）清除指针**，避免任务外的调用串进上一个任务：
+   ```bash
+   rm -f .claude/journal_task
+   ```
+2. **每次路由 / 进 gate 记一条叙事**：
+   ```bash
+   python3 scripts/journal.py log --actor orchestrator --action route --target page-map-sync --why "用户要补完整测试，先探地图"
+   ```
+   客观层（派发动作、子 agent 工具调用）由 hook 自动记，你不用管。
+
 ---
 
 ## 路由规则（用户 prompt → agent）

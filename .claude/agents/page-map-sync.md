@@ -37,6 +37,14 @@ description: 用 Playwright 实地探索目标页面，全量覆写 page_map/*.y
 
 每打开一个新页面探索、每写完一份 yaml，都 append 一行（含目标+行为，不要 generic）。
 
+## 运行日志 journal（叙事层）
+
+非平凡 selector 选择、每条「关键发现」记一条（客观层即你的工具调用由 hook 自动记，不用管）：
+```bash
+python3 scripts/journal.py log --actor page-map-sync --action find --target <页/selector> --why "..."
+```
+详见 `artifacts/README.md` 的「运行日志 Journal」一节。
+
 ## 任务参数
 
 目标 URL 列表 / 探索点由 orchestrator 在 prompt 中给出。

@@ -141,6 +141,55 @@ tail -f artifacts/<task_id>/progress.log
 
 ---
 
+## 运行日志 Journal（双层 / 只增不改）
+
+`progress.log` 只记里程碑（跑到哪一步），不足以复盘「谁做了什么、为什么」。
+为此引入 **`artifacts/<task_id>/journal.jsonl`**（**任务级**、只增不改，每行一个 JSON 事件），跟该任务其它产物同目录，天然按任务封顶、随任务归档，**项目级零膨胀**。用于事后复盘、追述行为、还理解债。分两层：
+
+| 层 | 谁写 | 怎么写 | 记什么 |
+|---|---|---|---|
+| **客观层** | Claude Code 的 hook **自动** | 无需 agent 动手 | 每次工具调用：`ts / actor / tool / target / 结果`。**agent 无法遗漏或美化** |
+| **叙事层** | **agent 主动** | `python3 scripts/journal.py log ...` | 「为什么」：决策依据、判定、发现。工具调用推断不出的意图 |
+
+- 客观层由 `.claude/settings.json` 的 `PostToolUse / SubagentStart / SubagentStop` hook 驱动，调 `scripts/journal.py hook`。`actor` 取 hook 的 `agent_type`（子 agent 才有；缺省=`orchestrator`），所以**能自动认出是哪个 agent 干的**。
+- 写哪个任务目录，由 `.claude/journal_task`（单行 task_id）决定，**由 orchestrator 在任务起手写入、在任务终态清除**（见 orchestrator 规范）。**没有这个指针就不记** —— journal 只审计任务执行，任务外的零散工具调用是噪声，不入账。
+
+### 叙事层 schema（agent 写）
+
+```bash
+python3 scripts/journal.py log \
+  --actor test-writing --action decide \
+  --what "把 search 输入框 selector 从 #query 改为 #q" \
+  --why  "元素定位到了，只是 cases.md 写的 id 过期" \
+  --ref  round-1
+```
+
+`--action` ∈ `decide | find | note | gate | route | error | lifecycle`；**`decide` 必须带 `--why`**（脚本会硬校验，缺了报错）。
+
+### 各 agent 的强制叙事点（最少这些必须记 why）
+
+- **orchestrator**：任务起手写 `.claude/journal_task`、终态清除；每次路由/进 gate 记一条 `route` / `gate`
+- **page-map-sync**：每个非平凡 selector 选择、每条「关键发现」记一条 `find`
+- **test-case-design**：每个 page_ref 缺口判断（标依赖 vs 编造）记一条 `decide`
+- **test-writing**：**每次「修地图 vs 修代码」「判 likely_bug」必须 `decide --why`**（这是理解债最重的地方）
+- **review**：每条 Blocking Issue 记一条 `find`，最终 verdict 记一条 `decide --why`
+
+### 复盘（人读）
+
+```bash
+python3 scripts/journal.py show                      # 当前任务（读指针）
+python3 scripts/journal.py show --task <task_id>      # 指定任务
+python3 scripts/journal.py show --actor test-writing --no-reads   # 只看某 agent，隐去 read 噪声
+python3 scripts/journal.py show --all                # 跨所有任务归并时间线（低频）
+python3 scripts/journal.py show --follow             # 实时跟随当前任务
+```
+
+输出里 `·` = 客观层（hook 自动），`✎` = 叙事层（agent 写的「为什么」）。
+
+> `artifacts/*/journal.jsonl` 已 gitignore（运行/取证数据，不入库）。`progress.log` 仍保留做轻量 live 心跳，二者职责不同：progress.log 看「活着没」，journal 看「干了啥、为啥」。
+
+---
+
 ## 失败 / 回滚
 
 - 任何 agent 失败：`status=failed`，写明失败原因

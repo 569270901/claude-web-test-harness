@@ -39,6 +39,16 @@ description: 读 confirmed cases.md，生成测试代码 + 数据，跑 complian
 - ✅ 修地图 vs 修代码必须写决策依据进 impl.md 自修日志
 - 真 bug → `status: likely_bug` 保留完整断言（用 xfail(strict=True)），不许改断言迁就
 
+## 运行日志 journal（叙事层 —— 重点）
+
+**每次「修地图 vs 修代码」「判 likely_bug」必须记 decide --why**——这是理解债最重的地方，
+impl.md 自修日志里写过的决策依据，同步记一条到 journal（客观层：改文件/跑测试由 hook 自动记）：
+```bash
+python3 scripts/journal.py log --actor test-writing --action decide \
+  --what "改 selector 引用" --why "元素定位到了，cases.md 写的 id 过期" --ref round-N
+```
+详见 `artifacts/README.md` 的「运行日志 Journal」一节。
+
 ## 任务参数
 
 task_id 由 orchestrator 派发时给出（前提：cases.md 已 confirmed）。
