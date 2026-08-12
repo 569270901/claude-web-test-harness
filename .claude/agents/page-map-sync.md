@@ -26,10 +26,31 @@ description: 用 Playwright 实地探索目标页面，全量覆写 page_map/*.y
 3. 全量覆写对应 `page_map/*.yaml`（不版本化、不增量合并）
 4. 写 `artifacts/<task_id>/sync.md`（三段：探索摘要 / 关键发现 / 给下游的注意事项）
 
+## 验收标准（写进 yaml 的每个 selector 都要有证据）
+
+- **禁止「视觉候选写法」**：selector 必须有实测证据——`locator.count() >= 1` 探针、heading/DOM
+  dump、或实际点击成功。凭截图/视觉印象猜标签层级（如猜 h1 实为 h5）一律不许入 yaml——
+  一旦写错，等下游用例跑批才会暴露，返工成本远高于探索阶段多花一分钟核实。
+- **关键交互路径**（多步表单、modal 提交）必须完整走通一遍再定稿 selector，走通后对标题/关键
+  元素做一次 heading dump 复核。
+- **怀疑项交叉验证**：同一目标用两种写法各测 count，不一致必须查明——防组件库旧 dropdown
+  留 DOM 只加 hidden class 造成的假匹配。
+- sync.md frontmatter 必须带 `outputs.confidence`：逐 yaml 标 `verified`（全部 selector 有
+  证据）或 `unverified`（写明哪些区域未实测及原因）。环境不可用时整份标 unverified，不许
+  默认 verified。
+- **flow.md 核对（任务有 confirmed flow.md 时强制）**：探索时逐项核对实际 UI 与 flow.md 记录的
+  操作流/文案字面值，一致打钩、不一致在 sync.md 单列「与 flow.md 的偏差」（含 flow.md
+  `⚠️待实测` 项的实测取值）——这是下游 test-writing 偏差清单的直接来源。
+- **交互动力学取证**：上传/提交/翻页类元素必须实际触发一次并抓包，把 `async.request /
+  async.settled / gates` 与多步表单的 `flows.steps` 写实测值（schema 见
+  artifacts/agents/page-map-sync.md）。静态 selector 齐了但动力学没取证的页面，不算探索
+  完成。不可逆动作无法触发时标 unverified，禁止编造。
+
 ## 红线
 
 - ❌ 不写测试代码、不写用例
 - ❌ 不改地图之外的非知识库文件
+- ❌ 不写没有实测证据的 selector（见上方验收标准）
 - ✅ 业务规则可补到知识库，但必须在 `sync.md` 的 `outputs.specs_updated` 声明
 - 发现新组件形态（如 popconfirm 无 role=dialog）→ 回写 rule.md 的探索 SOP
 

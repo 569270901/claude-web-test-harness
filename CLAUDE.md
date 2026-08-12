@@ -62,5 +62,6 @@ python -m pytest tests/ -v --headed
 
 > 「为 TesterHome 首页 + 搜索设计一套只读测试并写出来」
 
-主对话（orchestrator）会按需派发 `page-map-sync → test-case-design →(你审核 cases.md)→ test-writing → review`。
+主对话（orchestrator）会按需派发：
+`page-map-sync → test-case-design(阶段1解构→decomp.md，你审 GATE 0) → test-case-design(阶段2生成→cases.md+flow.md，你审 GATE 1) → test-writing → review`。
 **只做只读流程**（浏览话题列表、打开帖子详情、搜索关键词、断言渲染），不要自动化注册/登录/发帖。

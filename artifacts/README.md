@@ -3,6 +3,7 @@
 本目录定义"多 agent 协作"的编排规范。所有 agent 间不直接对话，**通过 artifact 文档接力**。
 
 **每个 agent 启动只读 2 份**：本文件 + `agents/<self>.md`。
+（唯一例外：test-case-design **阶段1** 追加读 `agents/decomposition.md` —— 解构层方法论。）
 
 ---
 
@@ -12,9 +13,9 @@
 |---|---|---|:-:|---|
 | **orchestrator** | 路由 / 状态机 / 调度 | 用户 prompt | - | [agents/orchestrator.md](agents/orchestrator.md) |
 | **page-map-sync** | Playwright 探索 → 覆写 page_map | 主动 / agent 反馈 | ✅ | [agents/page-map-sync.md](agents/page-map-sync.md) |
-| **test-case-design** | 需求 + 地图 → 测试用例 | 主动 | ✅ | [agents/test-case-design.md](agents/test-case-design.md) |
+| **test-case-design** | 两阶段：需求 → **结构化解构** → 测试用例 | 主动 | ✅ | [agents/test-case-design.md](agents/test-case-design.md)<br>方法论：[agents/decomposition.md](agents/decomposition.md) |
 | **test-writing** | 写脚本 + 自跑自修 | 主动 (需 confirmed cases) | ❌ | [agents/test-writing.md](agents/test-writing.md) |
-| **review** | 静态审查代码改动 | test-writing 跑后 / 主动 | ✅ | [agents/review.md](agents/review.md) |
+| **review** | 静态审查代码改动 | test-writing 收敛后 / 主动 | ✅ | [agents/review.md](agents/review.md) |
 
 ---
 
@@ -29,8 +30,11 @@ artifacts/
   <task_id>/                         ← 例: 2026-06-22_testerhome_home_search
     state.md                         ← orchestrator 维护
     sync.md                          ← page-map-sync 产出
-    cases.md                         ← test-case-design 产出
-    impl.md                          ← test-writing 产出
+    decomp.md                        ← test-case-design 阶段1 产出（结构化解构层：6 张表，GATE 0 单独审）
+    cases.md                         ← test-case-design 阶段2 产出（用例表，每条 derived_from 回指 decomp 表行）
+    flow.md                          ← test-case-design 阶段2 产出（操作流程对照单，GATE 1 与 cases.md 一并审）
+    ops_review.md                    ← test-writing 阶段1产出（与 confirmed flow.md 的偏差清单；偏差=0 不触发 gate）
+    impl.md                          ← test-writing 阶段2产出
     review.md                        ← review 产出（orchestrator 落盘）
     progress.log                     ← 行式进度日志
 ```
@@ -66,7 +70,7 @@ created_at: 2026-06-22T10:30:00Z
 - `pending` — 还没开始
 - `in_progress` — 干活中
 - `pending_review` — 等用户介入（GATE）
-- `confirmed` — 用户已确认（仅 cases.md 用）
+- `confirmed` — 用户已确认（仅 decomp.md / cases.md / ops_review.md 用）
 - `completed` — 完成，可接力
 - `failed` — 出错，需人介入
 - `blocked` — 达到上限/规则禁止继续
@@ -75,13 +79,31 @@ created_at: 2026-06-22T10:30:00Z
 
 ## Gate（人工介入点）
 
-只有 **1 个**强制 gate：
+2 个强制 gate + 1 个条件 gate：
 
 | Gate | 时机 | 用户动作 |
 |---|---|---|
-| **cases.md 审核** | test-case-design 产出后 | 编辑 cases.md，确认后回"确认"/"OK"/"通过" |
+| **GATE 0: decomp.md 解构审核**（强制） | test-case-design **阶段1** 产出后 | 直接编辑 6 张表的 cell。重点：表①范围 / 所有 `🔶推断` / 所有 `⚠️缺失`（知道答案的直接填）/ 表③ `⚠️未定义` 格子（未定义=应禁止？）/ 表⑥ 影响面；审完回"确认" |
+| **GATE 1: cases.md + flow.md 审核**（强制，**提测前即可完成**） | test-case-design **阶段2** 产出后 | cases.md 审覆盖度 + 「未覆盖说明」是否成立；flow.md **对照 UI 设计图**审操作流/文案字面值，不一致处加 `实际：…`；审完回"确认" |
+| **GATE 2: 偏差裁决**（条件触发） | test-writing 阶段1编码后，ops_review.md 偏差数 > 0 时 | 逐条二选一：`实际：…`（改断言跟实测）或 `产品bug：…`（xfail 挂号）；偏差=0 自动流转不打扰 |
 
 其他全部 agent 自动流转。
+
+> GATE 0 由来：需求 → cases.md 一跳太大，覆盖度不可审、缺口隐形（需求没写的表现为"没有那条
+> 用例"，而**缺席不引起注意**）、不积累。中间插入**结构化解构层**：需求/线上UI 先落成 6 张
+> 固定结构的表（功能点 / 字段规格 / 状态机 / 业务规则 / 操作旅程 / 影响面），每 cell 带
+> 「来源 + 置信度」，缺口从"没有用例"变成"表里一个显式的 ⚠️ 行"——**缺席变成在场**。
+> 于是覆盖率有了定义：`覆盖缺口 = 6 表里 ⚠️ 和空白 cell 的总数`；生成用例退化成查表映射
+> （表 × 方法，有数量下界），不再是 agent 的自由裁量。
+> **判断"这张表填得对不对"是人的强项，判断"这份清单全不全"是人的弱项**——GATE 0 就是把人
+> 放回他擅长的位置。完整方法论（A/B/C 三档输入策略、生成映射、迭代闭环）见
+> [agents/decomposition.md](agents/decomposition.md)。
+
+> GATE 1 由来：**审核尽量前置到提测前的等待期**——UI 设计图提测前就有、用户看得到而 agent
+> 没喂过；按钮文案/弹窗流/导航层级/tab 顺序这类错误应死在 flow.md 审核（对照设计图辨认，
+> 分钟级），不该活到跑批（一次全量回归可能是小时级）。**任务起手就把 UI 设计图（截图/导出）
+> 给 test-case-design 当输入——agent 能读图。**提测后设计图上看不出的东西（maxlength、toast、
+> DOM、时序）由 page-map-sync 取证和自跑循环兜住。
 
 ---
 
@@ -123,7 +145,7 @@ created_at: 2026-06-22T10:30:00Z
 [2026-06-22 14:23:08] page-map-sync step:exploring page=Home
 [2026-06-22 14:25:12] page-map-sync done:sync.md
 [2026-06-22 14:25:13] orchestrator route:test-case-design
-[2026-06-22 14:27:30] test-case-design gate:cases_review
+[2026-06-22 14:27:30] test-case-design gate:decomp_review
 ```
 
 **实现**（Bash 一行写入即可，agent 自己负责）：
@@ -136,6 +158,8 @@ echo "[$(date +'%Y-%m-%d %H:%M:%S')] page-map-sync step:exploring page=Home" \
 ```bash
 tail -f artifacts/<task_id>/progress.log
 ```
+
+或者让 Claude 在另一个会话里启 `Monitor` 工具 tail 该文件，每条事件作为推送通知。
 
 > 5 分钟以上无新事件 = 极可能挂了，可以人工介入或杀掉重启。
 
@@ -170,7 +194,8 @@ python3 scripts/journal.py log \
 
 - **orchestrator**：任务起手写 `.claude/journal_task`、终态清除；每次路由/进 gate 记一条 `route` / `gate`
 - **page-map-sync**：每个非平凡 selector 选择、每条「关键发现」记一条 `find`
-- **test-case-design**：每个 page_ref 缺口判断（标依赖 vs 编造）记一条 `decide`
+- **test-case-design**：**阶段1**——档位判定、每个「标 🔶推断 vs 标 ⚠️缺失」的边界判断记一条 `decide`；
+  **阶段2**——每个 page_ref 缺口判断（标依赖 vs 编造）、每条「未覆盖说明」的理由记一条 `decide`
 - **test-writing**：**每次「修地图 vs 修代码」「判 likely_bug」必须 `decide --why`**（这是理解债最重的地方）
 - **review**：每条 Blocking Issue 记一条 `find`，最终 verdict 记一条 `decide --why`
 
@@ -205,7 +230,17 @@ python3 scripts/journal.py show --follow             # 实时跟随当前任务
 
 - 「为 TesterHome 首页+搜索设计并写一套只读测试」← 完整流程
 - 「重新探索首页的页面地图」← 只走 page-map-sync
-- 「根据这份需求设计测试用例（需求贴在下面）」← 只走 test-case-design
+- 「根据这份需求设计测试用例（需求贴在下面）」← 只走 test-case-design（阶段1，走到 GATE 0）
 - 「审查我刚改的 test_home.py」← 只走 review
 
 orchestrator 自己判断该调哪些 agent、要不要 gate。
+
+---
+
+## 后续演化
+
+本规范会随真实任务积累持续演进。每跑完一个真实任务，回顾：
+- artifact schema 是否够用？字段冗余/缺失？
+- 红线是否被违反？怎么强化 prompt？
+- gate 时机合不合适？要不要加/减？
+- 循环上限是否合理？
