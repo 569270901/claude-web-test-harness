@@ -1,96 +1,146 @@
+**English** | [中文](README.zh-CN.md)
+
 # claude-web-test-harness
 
-一套**领域无关**的多 agent UI 自动化测试编排骨架。把它放进任意 Web 项目，用 [Claude Code](https://claude.com/claude-code) 驱动「探索页面 → 设计用例 → 写测试 → 审查」这条流水线。
+A multi-agent UI test automation framework driven by [Claude Code](https://claude.com/claude-code). Drop it into your Web project, tell it "help me test xxx", and it explores the pages, drafts a checklist, writes test cases, writes the code, and runs it — **pausing at the key checkpoints so you confirm before it moves on, instead of guessing on its own.**
 
-> 演示站点用 [TesterHome](https://testerhome.com)（QA 社区论坛），demo 流程全部**只读**（浏览/搜索/断言渲染），不涉及注册登录发帖。
-
----
-
-## 它解决什么
-
-写 UI 自动化的真实流程是：**摸清页面有哪些元素 → 把需求拆成可审的结构化清单 → 落成测试用例
-→ 落成测试代码 → 有人 review**。这套 harness 把这五步固化成四个隔离的 Claude Code 子 agent
-（test-case-design 内部再分两阶段），用 artifact 文档接力，关键节点设人工 gate：
-
-```
-   你(orchestrator/主对话)
-        │  派发
-        ▼
-┌────────────────┐   ┌───────────────────────────────┐   ┌───────────────┐   ┌──────────┐
-│ page-map-sync  │ → │ test-case-design（两阶段）     │ → │ test-writing  │ → │ review   │
-│ 探页面→页面地图│   │ 阶段1 需求→解构表(GATE 0)      │   │ 用例→测试代码 │   │ 静态审查 │
-│                │   │ 阶段2 解构表→用例+操作流(GATE1)│   │               │   │          │
-└────────────────┘   └───────────────────────────────┘   └───────────────┘   └──────────┘
-  page_map/*.yaml         decomp.md      cases.md+flow.md      test 代码         verdict
-```
-
-为什么中间插一道解构表：需求直接跳到用例清单，覆盖度没法审——需求没写的东西表现为"少一条
-用例"，而**缺席这件事本身不会被注意到**。解构层先把需求拆成 6 张固定结构的表（功能点/字段
-规格/状态机/业务规则/操作旅程/影响面），每个格子标"来源+置信度"，缺口就变成表里一个显眼的
-`⚠️` 行——用户在 **GATE 0** 审的是"这格填得对不对"，比审"这份用例清单全不全"容易判断得多。
-方法论细节见 [`artifacts/agents/decomposition.md`](artifacts/agents/decomposition.md)。
-
-**机制是通用的，业务是你的。** harness 本身不含任何业务概念——你的页面地图、登录逻辑、测试约定通过几个目录约定接进来。
+> The demo site is [TesterHome](https://testerhome.com) (a QA community forum). The demo flow is entirely **read-only** (browsing, searching, asserting rendered content) — no signup/login/posting is automated.
 
 ---
 
-## 前提：一个能跑 agent 的编码工具（首选 Claude Code）
+## What problem it solves
 
-这套 harness 的「执行引擎」是一个 **agentic 编码工具**——它负责扮演 orchestrator、调度各角色、读写 artifact、跑测试。
-本身的机制（角色规范 `artifacts/agents/*.md`、artifact schema、流水线、`page_map`/`data`/`tests` 约定）就是 **markdown + 一个普通的 pytest-playwright 工程**，不绑死任何一家工具。
+The real workflow behind writing UI automation breaks down into five steps:
 
-### 用 Claude Code（原生支持，开箱即用）
+**Figure out what's on the page → draft a checklist confirming nothing is missed → turn the
+checklist into formal test cases and step-by-step actions, confirm they're correct → generate
+test code and run it → have someone review the code**
 
-Claude Code 能直接读 `.claude/agents/`（子 agent 定义）和 `CLAUDE.md`（项目约定），原生做**隔离子 agent 派发**，所以零配置就能跑。下面「快速开始」就是 Claude Code 的流程。
+This harness assigns these five steps to 5 roles that hand off work through documents (not
+direct conversation), pausing wherever you need to confirm:
 
-### 用 Codex / CodeBuddy / 其他 agent 工具（喂一段兼容 prompt）
+```
+   you
+   │ describe what to test
+   ▼
+┌────────────┐   ┌──────────────────────────────┐   ┌──────────────┐   ┌────────┐
+│ explore    │ → │ draft checklist (you confirm) │ → │ code & run   │ → │ review │
+│ pages      │   │ → turn into test cases         │   │ tests        │   │        │
+│            │   │   (you confirm)                │   │              │   │        │
+└────────────┘   └──────────────────────────────┘   └──────────────┘   └────────┘
+ page map file      checklist → cases + steps           test code          verdict
+```
 
-其他工具没有 Claude Code 的子 agent 派发和 `CLAUDE.md` 自动加载机制，但 harness 的角色规范都是纯 markdown，可以让**单个 agent 读规范、按顺序扮演各角色**来模拟整条流水线。把下面这段 prompt 喂给它即可：
+### Why draft a "checklist" instead of writing test cases straight away
+
+Jumping straight from requirements to "write test cases" makes it easy to miss things — and
+**there's no way to check afterward whether something was missed**. A scenario the requirements
+never mention simply shows up as "one fewer test case" in the final list, and a missing item
+by itself never draws anyone's attention.
+
+So a step is inserted in between: break the requirements down into a **checklist** first
+(6 categories, in plain terms):
+
+| Category | What it checks |
+|---|---|
+| Feature list | What points this feature needs to be tested on |
+| Field specs | The rules for each field — required? max length? default value? |
+| State transitions | How states can change, and which transitions are disallowed |
+| Business rules | What extra constraints apply |
+| User journeys | What the user actually clicks, and what happens next |
+| Impact scope | Whether this change could affect other features |
+
+Anything the checklist can't fill in or isn't sure about **is flagged as-is** — never silently
+skipped or made up. All you need to do is scan this list — "is this category's scope right",
+"I know the answer to these uncertain items", "this state transition wasn't specified, should
+it be allowed or not" — which is far easier than being handed a list of dozens of test cases
+afterward and having to judge by feel whether "everything" was covered. **Judging whether one
+line is correct is something you're good at; judging whether a whole list is complete is
+exactly where things get missed.**
+
+Once you confirm the checklist, the harness generates the formal test cases and the
+"what the user actually does" step-by-step description from it — that step also pauses for
+your confirmation before the test code gets written.
+
+For the full methodology (exactly how the checklist gets filled in, and the judgment criteria
+for each category), see
+[`artifacts/agents/decomposition.md`](artifacts/agents/decomposition.md) — you don't need to
+read it to use the harness normally; it follows this method on its own.
+
+**The mechanism is generic, the business logic is yours.** The harness itself contains no
+business concepts — your page maps, login logic, and testing conventions are plugged in
+through a handful of directory conventions.
+
+---
+
+## Prerequisite: a coding tool that can run AI agents (Claude Code recommended)
+
+This harness relies on an **AI coding tool** to act as the "dispatcher" — it's responsible for
+telling each role what to do, reading/writing documents, and running tests. The harness itself
+is just **a pile of markdown instructions + an ordinary pytest-playwright project**; it isn't
+tied to any one tool.
+
+### With Claude Code (native support, works out of the box)
+
+Claude Code can directly read `.claude/agents/` (role definitions) and `CLAUDE.md` (project
+conventions), so it runs with zero configuration. The "Quick Start" section below is the
+Claude Code flow.
+
+### With Codex / CodeBuddy / other agent tools (feed it a compatibility prompt)
+
+Other tools don't have Claude Code's native ability to dispatch isolated roles, but the
+harness's instructions are all plain markdown, so you can have **a single agent play each role
+in sequence** to walk the whole pipeline. Feed it this prompt:
 
 ```text
-你是这个仓库的测试编排 orchestrator。先读这几份文件理解机制：
-- artifacts/README.md（编排规范：artifact schema、状态枚举、gate、红线、progress.log）
-- artifacts/agents/ 下全部角色规范（orchestrator / page-map-sync / test-case-design / test-writing / review）
-- artifacts/agents/decomposition.md（test-case-design 阶段1 的解构方法论，6 张表 schema）
-- CLAUDE.md（项目约定：站点 URL、目录、登录、开发原则）
-- rule.md（selector 写法等技术红线）
+You are the test orchestration dispatcher for this repo. First read these files to understand
+how it works:
+- artifacts/README.md (overview: document formats, statuses, where to pause for confirmation, hard rules)
+- everything under artifacts/agents/ (dispatcher / page explorer / checklist+test-case design / test writing / review)
+- artifacts/agents/decomposition.md (the methodology for how the "checklist" gets filled in)
+- CLAUDE.md (project conventions: site URL, directories, login, development principles)
+- rule.md (technical hard rules such as selector conventions)
 
-然后按这条流水线依次执行（你没有隔离子 agent，就在当前上下文里逐个扮演每个角色）：
-page-map-sync
-→ test-case-design 阶段1=解构（产出 decomp.md）→（停下来等我审 GATE 0）
-→ test-case-design 阶段2=生成（产出 cases.md + flow.md）→（停下来等我审 GATE 1）
-→ test-writing → review
+Then execute this pipeline in order (you don't have isolated sub-roles, so play each role in
+sequence within the current conversation):
+explore pages → draft checklist → (pause for my confirmation) → generate formal test cases and
+steps → (pause for my confirmation) → write code and run it → review
 
-严格遵守：
-1. 每个角色产出对应 artifact，带完整 frontmatter（schema 见 artifacts/README.md）
-2. decomp.md 产出后 status=pending_review，必须停下等我确认（GATE 0），cases.md+flow.md
-   产出后同样必须停下（GATE 1）——两个 gate 都不准跳过
-3. 关键阶段 append 一行到 artifacts/<task_id>/progress.log
-4. 绝不删断言来让测试通过；selector 禁用 hash class / :nth-child / xpath 位置索引
+Strictly follow these rules:
+1. Each role produces its corresponding document with a complete format (see artifacts/README.md
+   for the exact schema)
+2. You must pause and wait for my confirmation after producing the checklist and the test
+   cases/steps — never skip this
+3. Append a log line to artifacts/<task_id>/progress.log at each key stage
+4. Never delete assertions just to make a test pass; selectors must not use hash classes,
+   :nth-child, or positional xpath indices
 
-我的需求是：<在这里写你要测什么>
+My requirement is: <describe what you want tested here>
 ```
 
-> 注意：非 Claude Code 工具是「单上下文模拟多角色」，没有真正的进程隔离，长任务上下文容易串味；建议一次只跑一条流水线、勤看 `progress.log`。能力够强的 agent 工具都能跑，效果取决于工具本身。
+> Note: non-Claude-Code tools run as "one agent playing multiple roles", without true context
+> isolation — long tasks can bleed context between roles. Run one pipeline at a time and watch
+> `progress.log` closely. Results depend on the capability of the tool you're using.
 
 ---
 
-## 快速开始
+## Quick Start
 
 ```bash
-# 1. 装依赖
+# 1. Install dependencies
 pip install -r requirements.txt
 python -m playwright install chromium
 
-# 2. 先跑一下自带的示例测试（证明脚手架能跑）
+# 2. Run the bundled sample tests first (proves the scaffold works)
 python -m pytest tests/ -v
 
-# 3. 在本项目目录打开 Claude Code，对主对话说一句话即可启动编排：
-#    「为 TesterHome 首页+搜索设计一套只读测试并写出来」
-#    主对话会按需派发 page-map-sync → test-case-design(解构→GATE 0→生成→GATE 1) → test-writing → review
+# 3. Open Claude Code in this project directory and just say what you want, e.g.:
+#    "Design and write a read-only test suite for the TesterHome homepage and search"
+#    It will automatically dispatch: explore pages → draft checklist (you confirm) →
+#    generate test cases (you confirm) → write code & self-run → review
 ```
 
-跑编排时，用另一个终端实时看进度：
+While it's running, watch progress live in another terminal:
 
 ```bash
 tail -f artifacts/<task_id>/progress.log
@@ -98,24 +148,29 @@ tail -f artifacts/<task_id>/progress.log
 
 ---
 
-## 接进你自己的项目
+## Plugging in your own project
 
-harness 不靠配置文件，靠**目录约定 + 一份 `CLAUDE.md`**。agent 规范里没有硬编码任何业务路径——它们读 `CLAUDE.md` 自适应。把 demo 换成你自己的项目，按下面四步改：
+The harness has no config files — it relies on **directory conventions + one `CLAUDE.md`**.
+Nothing is hardcoded to any particular business path; everything adapts by reading `CLAUDE.md`.
+Swap out the demo for your own project in four steps:
 
-### 第 1 步：改基础 URL（必改）
+### Step 1: Change the base URL (required)
 
-站点地址在 **`pytest.ini` 的 `--base-url`**，改成你的环境：
+The site address lives in **`pytest.ini`'s `--base-url`** — change it to your environment:
 
 ```ini
 # pytest.ini
 addopts = --tb=short --base-url=https://your-app.example.com
 ```
 
-测试里通过 pytest-playwright 自带的 `base_url` fixture 拿到它，无需在代码里写死域名。`CLAUDE.md` 的「项目约定」表里也同步改一下（agent 读它来理解你的站点）。
+Tests pick it up via pytest-playwright's built-in `base_url` fixture, so no domain is hardcoded
+in the test code. Also update the "Project Conventions" table in `CLAUDE.md` (the agents read
+it to understand your site).
 
-### 第 2 步：加登录逻辑（按需）
+### Step 2: Add login logic (as needed)
 
-demo 全程只读、不需要登录。要测登录后的页面，就在 **`conftest.py`** 里加一个 fixture（文件里已有占位注释）：
+The demo is entirely read-only and needs no login. To test pages behind a login, add a fixture
+in **`conftest.py`** (there's already a placeholder comment in the file):
 
 ```python
 import pytest
@@ -123,79 +178,90 @@ import pytest
 @pytest.fixture
 def logged_in_page(page, base_url):
     page.goto(f"{base_url}/account/sign_in")
-    page.fill("input#user_login", "your-test-account")   # selector 换成你站点的
-    page.fill("input#user_password", "***")              # 真实密码用环境变量，别提交进仓库
+    page.fill("input#user_login", "your-test-account")   # swap in your site's selectors
+    page.fill("input#user_password", "***")               # use env vars for real passwords, never commit them
     page.click("button[type=submit]")
-    page.wait_for_url(f"{base_url}/")                     # 等登录跳转完成
+    page.wait_for_url(f"{base_url}/")                     # wait for the post-login redirect
     return page
 ```
 
-然后需要登录的测试用 `logged_in_page` 代替 `page` 即可。在 `CLAUDE.md` 的「登录逻辑」一行注明入口，test-writing agent 写需要登录的用例时会用上它。
+Tests that need to be logged in then use `logged_in_page` instead of `page`. Note the entry
+point on the "Login logic" line in `CLAUDE.md`, and the test-writing step will pick it up
+automatically.
 
-> ⚠️ 凭据走环境变量 / `.env`（已 gitignore），**不要把账号密码提交进仓库**。
+> ⚠️ Credentials go through environment variables / `.env` (already gitignored) —
+> **never commit account credentials into the repo.**
 
-### 第 3 步：声明项目约定
+### Step 3: Declare your project conventions
 
-打开 **`CLAUDE.md`** 改「项目约定」表——agent 每次干活前都读它：
+Open **`CLAUDE.md`** and edit the "Project Conventions" table — every role reads it before
+doing any work:
 
-| 约定 | 默认值（本 demo） | 换成你的 |
+| Convention | Default value (this demo) | Change to yours |
 |---|---|---|
-| 站点基础 URL | `https://testerhome.com` | 同第 1 步 |
-| 页面地图目录 | `page_map/` | 一般保持 |
-| 测试代码目录 + 运行命令 | `tests/`，`python -m pytest tests/ -v` | 你的目录 / 命令 |
-| 测试数据目录 | `data/`（YAML） | 你已有的数据驱动层 |
-| 登录逻辑 | demo 只读、无需登录 | 指向第 2 步的 fixture |
+| Site base URL | `https://testerhome.com` | Same as step 1 |
+| Page map directory | `page_map/` | Usually keep as-is |
+| Test code directory + run command | `tests/`, `python -m pytest tests/ -v` | Your directory / command |
+| Test data directory | `data/` (YAML) | Your existing data-driven layer |
+| Login logic | Demo is read-only, no login needed | Point to the fixture from step 2 |
 
-### 第 4 步：清掉 demo 产物，让 agent 重新生成
+### Step 4: Clear out the demo artifacts and let it regenerate
 
-demo 自带的 TesterHome 产物删掉即可，agent 会按你的站点重新探索生成：
+Just delete the bundled TesterHome artifacts — the harness will re-explore and regenerate them
+for your site:
 
 ```bash
-rm -f page_map/testerhome/*.yaml      # 旧页面地图
-rm -f tests/test_*.py                 # 旧测试
-rm -f data/testerhome.yaml            # 旧数据
-rm -rf artifacts/2026-*               # 旧任务归档（保留 artifacts/README.md 和 agents/）
+rm -f page_map/testerhome/*.yaml      # old page map
+rm -f tests/test_*.py                 # old tests
+rm -f data/testerhome.yaml            # old data
+rm -rf artifacts/2026-*               # old task archives (keep artifacts/README.md and agents/)
 ```
 
 ---
 
-## 🚀 然后就是「说人话」驱动测试
+## 🚀 Then just drive testing by describing what you want in plain language
 
-这是整套 harness 的核心用法——**接入完成后，你不用再手写一行测试代码，只要对 Claude Code 主对话用自然语言描述要测什么**，编排就会自动跑起来（探索页面 → 结构化解构需求（你审 GATE 0）→ 生成用例和操作流（你审 GATE 1）→ 写代码 → 审查）：
+This is the core workflow of the whole harness — **once it's plugged in, you never write a line
+of test code by hand; you just describe what to test in natural language**:
 
 ```text
-用户登录后，在商品列表搜索关键词，加入购物车，校验购物车数量和金额
+After the user logs in, search for a keyword in the product list, add it to the cart, and
+verify the cart's item count and total price.
 ```
 
-agent 会先把这段需求拆成 6 张结构化表（功能点、字段规格、状态机、业务规则、操作旅程、影响面），
-你在 GATE 0 扫一遍表格 cell（比读用例清单判断"够不够"轻松得多）；确认后 agent 才查表生成正式
-用例和操作流对照单，你在 GATE 1 对照 UI 设计图核对一遍；确认后落成测试代码并自跑自修。
-**你描述「测什么」，harness 负责「怎么测」和「测没测全」。**
+It will explore the relevant pages on its own, break this requirement down into a checklist
+(what points this feature needs testing on, what rules each field has, how states transition,
+what business constraints apply, exactly what the user does, whether it could affect other
+features) — **and pause for you to scan it**; once you confirm, it generates the formal test
+cases and step-by-step actions from the checklist — **and pauses again for your confirmation**;
+after both confirmations, it writes the test code and self-runs/self-repairs it.
+**You describe "what to test", it handles "how to test it" and "whether it's fully covered" —
+you just need to nod or correct it at two checkpoints.**
 
-> 💡 想看它真实跑出来什么样？仓库里 `artifacts/2026-06-23_testerhome_home_search/` 保留了一次完整运行的全部产物（`sync.md` / `cases.md` / `impl.md` / `review.md` / `progress.log`），可以照着看每一步的输入输出。
+> 💡 Want to see what a real run looks like? `artifacts/2026-06-23_testerhome_home_search/` in
+> this repo keeps every artifact from one complete run, so you can follow the input/output of
+> each step.
 
 ---
 
-## 目录
+## Layout
 
 ```
-.claude/agents/               4 个原生子 agent 定义（page-map-sync / test-case-design / test-writing / review）
-artifacts/README.md           编排总览：artifact schema、状态枚举、gate、红线、progress.log
-artifacts/agents/             5 个角色规范（含 orchestrator）+ decomposition.md（解构层方法论）
-tools/decomp_review.py        decomp.md 批注服务器（内部工作用，GATE 0 前自查）
-tools/checkpoint_review.py    检查点清单评审服务器（GATE 0 正式人审介质，可选用法）
-tools/checkpoint_audit.py     机器查账：孤儿行（漏覆盖）+ 幽灵回指（agent 编造溯源）
-page_map/                     页面地图（YAML，描述当前部署的页面元素/selector）
-data/                         测试数据
-tests/                        测试代码
-scripts/journal.py            运行日志：hook 客观记录 + agent 叙事「为什么」，用于复盘 agent 行为
-CLAUDE.md                     项目约定（接入方在此声明自己的目录/命令/登录）
-rule.md                       技术避坑（selector 写法、等待时机）
+.claude/agents/               Definitions for the 4 roles (page explorer / checklist+test-case design / test writing / review)
+artifacts/README.md           Overview: document formats, statuses, confirmation points, hard rules, progress log
+artifacts/agents/             Detailed spec for all 5 roles (incl. the dispatcher) + decomposition.md (checklist methodology)
+tools/                        Helper scripts: a web UI for annotating the checklist, and a tool that audits for missed/fabricated references
+page_map/                     Page maps (YAML describing the currently deployed page elements/selectors)
+data/                         Test data
+tests/                        Test code
+scripts/journal.py            Run log: automatic recording + each role's own account of "why it judged this way", for post-hoc review
+CLAUDE.md                     Project conventions (declare your own directories/commands/login here)
+rule.md                       Technical pitfalls to avoid (selector conventions, timing issues)
 ```
 
-每跑一个任务会在 `artifacts/<task_id>/` 下归档 `state.md` / `sync.md` / `decomp.md` / `cases.md` /
-`flow.md` / `ops_review.md` / `impl.md` / `review.md` / `progress.log` / `journal.jsonl`
-（运行日志，见 `artifacts/README.md`「运行日志 Journal」）。未涉及的阶段跳过对应文件。
+Every task run is archived under `artifacts/<task_id>/` with every document produced along the
+way (the checklist, test cases, step-by-step actions, records of test-code changes, review
+conclusions, progress log), so you can always go back and inspect the input/output of each step.
 
 ---
 
