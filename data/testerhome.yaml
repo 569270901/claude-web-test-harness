@@ -9,5 +9,7 @@ search:
   expect_results_contain: "appium"
 
 # 首页断言用
+# 实测值（curl https://testerhome.com | 抓 <title>）：真实站点标题是中文"测试之家"，
+# 不含英文 "TesterHome" 字样——旧值是编造的，未经验证，2026-08-18 核实后订正。
 home:
-  expect_title_contains: "TesterHome"
+  expect_title_contains: "测试之家"

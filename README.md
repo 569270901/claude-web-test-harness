@@ -267,4 +267,4 @@ conclusions, progress log), so you can always go back and inspect the input/outp
 
 ## License
 
-[Apache-2.0](./LICENSE)
+[MIT](./LICENSE)

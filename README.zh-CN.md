@@ -224,4 +224,4 @@ rule.md                       技术避坑（selector 写法、等待时机）
 
 ## License
 
-[Apache-2.0](./LICENSE)
+[MIT](./LICENSE)

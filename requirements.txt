@@ -1,4 +1,9 @@
-pytest>=8.0
-pytest-playwright>=0.5
-playwright>=1.40
-pyyaml>=6.0
+# 锁定精确版本（2026-08-18 在 macOS 上实测通过）。
+# 不锁版本会导致不同机器/不同时间 pip install 装到不同的 playwright 版本，
+# 而 playwright 的 Python 包版本和它能装的 Chromium 二进制强绑定——版本一漂，
+# `playwright install chromium` 就可能在某些系统上失败或装出不兼容的浏览器。
+# 升级前先在自己机器上把 `python -m pytest tests/ -v` 跑绿，再改这里的版本号。
+pytest==9.1.1
+pytest-playwright==0.8.0
+playwright==1.60.0
+pyyaml==6.0.3
