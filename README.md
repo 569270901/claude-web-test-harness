@@ -238,9 +238,11 @@ after both confirmations, it writes the test code and self-runs/self-repairs it.
 **You describe "what to test", it handles "how to test it" and "whether it's fully covered" —
 you just need to nod or correct it at two checkpoints.**
 
-> 💡 Want to see what a real run looks like? `artifacts/2026-06-23_testerhome_home_search/` in
-> this repo keeps every artifact from one complete run, so you can follow the input/output of
-> each step.
+> 💡 `artifacts/2026-06-23_testerhome_home_search/` in this repo holds one early trial run, but
+> it predates the current two-phase methodology (no decomp.md/GATE 0) and part of what it
+> describes never actually landed in the codebase — see the disclaimer at the top of each file
+> in that folder. A real, up-to-date example run is on the to-do list (best produced against a
+> project with real login/state, where the full GATE 0/1/2 pipeline actually gets exercised).
 
 ---
 

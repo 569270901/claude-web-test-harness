@@ -37,6 +37,14 @@ notes: "全部 12 用例通过。Round 1 暴露 1 处 page_map 漂移（nav 无 
 created_at: 2026-06-23T13:40:00Z
 ---
 
+> ⚠️ **归档降级声明（2026-08-18 追加）**：本任务产出于两阶段方法论（decomp.md / GATE 0）
+> 引入之前，是这套 harness 最早期的一次试跑草稿。经外部审查+核实发现：本文档描述的部分
+> 实现（如 `test_search.py`、`conftest.py` 的 `td` fixture、data-driven 断言）**从未真正
+> 合入代码库**，当前 `tests/` 目录下的实际文件与本文档描述不一致。保留此归档仅作历史参考，
+> **不代表当前项目的实际能力**，请勿据此判断 harness 现状。真正货真价实的完整样例待接入一个
+> 带登录/带状态机的真实项目后重新产出（见 `README` 的"接进你自己的项目"一节）。
+
+
 # 实现摘要
 
 按 confirmed cases.md 的 12 条用例生成只读测试，全部对 live 站点 https://testerhome.com 真实通过。
