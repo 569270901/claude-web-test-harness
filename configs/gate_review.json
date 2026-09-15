@@ -1,0 +1,34 @@
+{
+  "$comment": "GATE 0 评审台（tools/gate_review.py + tools/gate_review_ui.py）的可选配置。整个文件可以删掉——所有键都有默认值，缺省时工具完整可用，只是「需求文档交叉引用」会优雅退化（不再按分类/端别给卡片排序，仍能按字面值反查原文）。",
+
+  "$prd_index_说明": [
+    "把需求文档切成「章节链 → 位置 → 变更行」的块，供决策卡反查原文背景。",
+    "categories / scopes 是**你项目需求文档里实际会出现的一级标题字面值**：",
+    "  categories = 变更分类标题（例：\"按钮文案调整\" \"字段校验调整\"）",
+    "  scopes     = 端别 / 角色标题（例：\"后台\" \"前台\" \"移动端\"）",
+    "两个都留空（默认）时：标题不参与分类，卡片仍按「字面值命中」反查到原文块，",
+    "只是失去「同一字符串出现在多个页面时按位置词排序」的能力。",
+    "需求文档形状完全不同（没有 `N. 位置` + `旧 → 新` 这种变更行）时，",
+    "prd_index 自然返回空列表，卡片上的「需求文档原文」区块直接不显示——不报错。"
+  ],
+  "prd_index": {
+    "categories": [],
+    "scopes": [],
+    "rule_section_markers": ["规范内容", "规则说明", "总体规则", "背景与目标"]
+  },
+
+  "$分诊说明": [
+    "下面两张关键词表决定「哪些 🔶/⚠️ 卡片真的要占用户注意力」，是**兜底**——",
+    "首选是 agent 在 decomp.md 里显式写的 ［需判断］/［可提测］标签。",
+    "留空（或删掉这两个键）时用 tools/gate_review.py 里的中性默认表。",
+    "接入具体项目时，把你们内部真正「出事就很贵」的词加进 high_stakes_markers。"
+  ],
+  "high_stakes_markers": [],
+  "scope_markers": [],
+
+  "$non_decision_cols说明": "这些列里的 ⚠️ 是给下游 agent 的工作项（如 page_ref 待探索），不是问用户的问题，不成卡。",
+  "non_decision_cols": [],
+
+  "$checkpoint_module_names说明": "tools/checkpoint_review.py 用：检查点 ID 前缀 → 模块中文名，纯展示。留空则界面显示裸 ID。例：{\"CP-SRCH\": \"搜索\", \"CP-AUTH\": \"登录态\"}",
+  "checkpoint_module_names": {}
+}

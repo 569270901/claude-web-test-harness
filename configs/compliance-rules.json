@@ -1,0 +1,72 @@
+{
+  "$comment": "项目红线静态扫描规则（v1，保守）。脚本 scripts/check_compliance.py 消费这份配置；新增/调整规则在此一处生效。接入自己的项目时按需增删规则，globs 指向你实际的目录。",
+  "$philosophy": [
+    "1. 默认 warn，慎用 error — error 误伤会让人无脑 noqa",
+    "2. 不准 silent noqa — 必须写 `# rules-allow: <rule_name> (<reason>)` 留可审计",
+    "3. 业务真值优先于规则 — 例如表单合法填 0 时用 noqa 豁免",
+    "4. 规则可演化 — v1 宽松，跑一段时间看哪些误报多再调严"
+  ],
+  "version": 1,
+  "rules": [
+    {
+      "name": "no_xpath_position_index_group",
+      "level": "error",
+      "globs": ["pages/**/*.py", "page_map/**/*.yaml", "tests/**/*.py", "utils/**/*.py", "core/**/*.py", "functional/**/*.py"],
+      "pattern": "\\)\\[[0-9]+\\]",
+      "context": "xpath=",
+      "exempt_pattern": "(following|preceding|following-sibling|preceding-sibling|ancestor|descendant)::",
+      "reason": "xpath 分组位置索引 (foo)[N] 易碎——前端改版时这类 selector 挂得最多；改用 Playwright 的 .first/.nth(n) 或语义 selector（见 rule.md「Selector 优先级」）"
+    },
+    {
+      "name": "no_nth_child",
+      "level": "warn",
+      "globs": ["pages/**/*.py", "page_map/**/*.yaml"],
+      "pattern": ":nth-child\\(",
+      "reason": ":nth-child 是 DOM 位置索引；表格行/列结构变化时易碎。考虑用 :has-text() / data-* / 语义 class"
+    },
+    {
+      "name": "no_hash_class",
+      "level": "warn",
+      "globs": ["pages/**/*.py", "page_map/**/*.yaml"],
+      "pattern": "['\"](\\.[A-Za-z][\\w-]*)?(css-[a-f0-9]{6,}|_[A-Z][a-zA-Z]*_[a-z0-9]{5,})",
+      "reason": "构建期 hash class（css-1ryoxjy / _Button_abc123）跨版本必变；用语义 class / ID / 文本"
+    },
+    {
+      "name": "no_test_subdirectory",
+      "level": "error",
+      "type": "path_check",
+      "forbidden_glob": ["tests/*/test_*.py", "tests/*/*/test_*.py"],
+      "reason": "测试文件不嵌套模块子目录（CLAUDE.md「项目约定」表：测试代码目录 tests/，不嵌套模块子目录）。直接放 tests/ 下"
+    },
+    {
+      "name": "test_weak_assertion",
+      "level": "warn",
+      "globs": ["tests/**/*.py"],
+      "pattern": "^\\s*assert\\s+\\S+\\s+is\\s+not\\s+None\\s*(,|$)",
+      "reason": "弱断言：is not None 几乎总通过。建议改用具体值比较（如 == expected / in / >0）"
+    },
+    {
+      "name": "no_raw_set_input_files",
+      "level": "warn",
+      "globs": ["tests/**/*.py", "pages/**/*.py", "functional/**/*.py"],
+      "pattern": "\\.set_input_files\\(",
+      "reason": "文件上传是异步的，裸 set_input_files 后不等接口回包 + DOM 证据，组件校验会静默拦截（表单卡住但没有任何报错）；走统一的 upload helper，等待条件读 page_map 的 async 动力学字段"
+    },
+    {
+      "name": "no_inline_ant_dropdown_selector",
+      "level": "warn",
+      "globs": ["tests/**/*.py", "functional/**/*.py"],
+      "pattern": "ant-select-dropdown|ant-picker-dropdown",
+      "reason": "测试文件内联裸写组件库下拉浮层 selector 是已付过学费的坑（旧 dropdown 关闭后 DOM 不移除、只加 hidden class → stale 假匹配 / :text-is 零匹配）；应走 page object 里已经修好的下拉 helper"
+    }
+  ],
+  "$design_notes": {
+    "no_xpath_position_index_group": "regex 抓 `\\)[N]` 模式，因为 (group)[N] 是典型的「全局取第 N 个」反模式。exempt_pattern 把 following::/preceding:: 这类语义导航的链式 [N] 放过。",
+    "no_hash_class": "regex 仍可能误报（如行内字符串恰好含下划线长串）；level=warn 不阻断，每周看一遍人工判断。",
+    "no_test_subdirectory": "forbidden_glob 是**项目约定**，不是通用真理——接入方若按模块分目录组织测试，删掉这条规则或改成自己的形状。",
+    "test_weak_assertion": "is not None 只代表「字段被赋值」，不代表「赋值正确」。早期防御。",
+    "no_inline_ant_dropdown_selector": "⚠️ **组件库特有规则**——pattern 里的 class 名来自 Ant Design（本 demo 用的库）。接入自己的项目时把 pattern 换成你的组件库的浮层 class（如 el-select-dropdown / MuiPopover / v-select__content），不用组件库就整条删掉。背后的教训是通用的：浮层类组件关闭后常常不移除 DOM、只加 hidden class，于是旧浮层仍能被 selector 匹配到。",
+    "no_raw_set_input_files": "同样偏组件库/框架特有：裸 set_input_files 的问题在带异步校验的上传组件上最明显。原生 input[type=file] 不走校验的项目可以删掉这条。",
+    "noqa_格式": "在行末加 `# rules-allow: <rule_name> (<原因>)` 即可豁免单行。必须含 reason，方便日后审计。"
+  }
+}

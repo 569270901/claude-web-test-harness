@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# 项目静态红线检查。
+# 跑 scripts/check_compliance.py --staged，扫本次 commit 的 staged 文件。
+# error 阻断 commit；warn 不阻断只打印。
+#
+# 安装：bash scripts/install_hooks.sh
+# 临时跳过：git commit --no-verify（不推荐，error 必须修而非跳）
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "$REPO_ROOT" || exit 2
+
+PY="python3"
+if [ -x "venv/bin/python" ]; then
+  PY="venv/bin/python"
+fi
+
+"$PY" scripts/check_compliance.py --staged
+EXIT=$?
+
+if [ "$EXIT" -ne 0 ]; then
+  echo "" >&2
+  echo "❌ commit blocked by compliance check" >&2
+  echo "   修复上述 error，或在违规行末加 \`# rules-allow: <rule_name> (<reason>)\` 豁免" >&2
+  echo "   紧急情况可用 \`git commit --no-verify\` 跳过（不推荐）" >&2
+  exit 1
+fi
+
+exit 0

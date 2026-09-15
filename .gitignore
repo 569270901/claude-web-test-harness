@@ -14,6 +14,13 @@ data/debug/
 artifacts/*/journal.jsonl
 .claude/journal_task
 
+# 需求文档与设计图：**只留本地，绝不入库**
+# 这是公开仓库，而接入方跑真实项目时喂给 agent 的需求文档 / 设计稿通常是未发布的机密。
+# tools/prd_intake.py 的产物正好落在这两个目录，prd/ 是手动放原件的常见位置。
+artifacts/*/input/
+artifacts/*/ui_design/
+prd/
+
 # 编辑器
 .idea/
 .vscode/

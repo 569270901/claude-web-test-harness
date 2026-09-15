@@ -1,6 +1,24 @@
 # -*- coding: utf-8 -*-
 """decomp.md 结构化解构层 · GATE 0 评审服务器（纯标准库，无需安装依赖）
 
+⚠️ 【上一代实现 · 已被 tools/gate_review.py + tools/gate_review_ui.py 取代，保留作历史参考】
+
+    同一个位置、同一份输入（decomp.md）、同一道闸（GATE 0），但本文件的能力止于
+    「逐行批注 + 导出 Markdown」：
+      · 行 ID 只认 6 种固定前缀（A/F/S/R/J/I），认不出表⑦ 之后扩展的行；
+      · 没有分诊——所有 🔶/⚠️ 行一视同仁全部呈给用户（新实现里这正是
+        「33 张卡注意力会崩溃」那条教训要解决的问题）；
+      · 没有人审前快照，因而拿不到「人在 GATE 0 改了多少格」这个评测信号；
+      · 批注只到「表态 + 说明」，不产生机器可读的裁决单供下游 agent 回填。
+
+    新流程请用：
+        python3 tools/gate_review.py    parse <task>          # 解析自检
+        python3 tools/gate_review_ui.py serve <task> [端口]   # 评审台（默认 8901）
+        python3 tools/qa_console.py     serve [端口]          # 单端口总控（默认 8900）
+
+    本文件不再演进，也不建议在新任务上使用；留着是为了能读懂早期 artifacts 里的
+    decomp_notes.json，以及对照看这一层是怎么长出来的。
+
 用法：
     python3 tools/decomp_review.py artifacts/<task_id> [端口]     # 默认 8877
 

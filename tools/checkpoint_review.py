@@ -26,18 +26,16 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 from decomp_review import parse as parse_decomp                      # noqa: E402
 from checkpoint_audit import load_checkpoints, parse_prd_sections   # noqa: E402
+from gate_review import load_config                                 # noqa: E402
 
 LOCK = threading.Lock()
 CP_STANCE = {"ok", "fix", "drop", ""}
 MOD_STANCE = {"enough", "missing", ""}
-MODULE_CN = {
-    "CP-CAT": "Category 管理（假种）", "CP-POL": "Policy 管理（发放规则）",
-    "CP-UNL": "不限额假种 · 配置侧", "CP-ASN": "Policy 分配 / 移除 / 切换",
-    "CP-BAL": "余额管理 Accrual / Carryover / Adjustment", "CP-REQ": "请假申请",
-    "CP-APV": "审批流", "CP-CXL": "请假取消（撤回 / 取消）",
-    "CP-CFG": "审批配置 Default Approver / Report To", "CP-DTL": "Accrual Detail 明细",
-    "CP-VIEW": "雇员 PTO 视图", "CP-SYS": "权限 / 通知 / 跨模块回归",
-}
+# 检查点 ID 前缀 → 模块中文名。**纯展示用**，是每个项目自己的模块划分，
+# 所以不硬编码在代码里：写在 configs/gate_review.json 的 checkpoint_module_names，
+# 形如 {"CP-SRCH": "搜索", "CP-AUTH": "登录态"}。
+# 不配置就是空表，界面直接显示裸 ID（`MC[m]||''` / `.get(m,'')` 已做退化）。
+MODULE_CN = dict(load_config().get("checkpoint_module_names") or {})
 
 
 def build(td: Path):
@@ -221,7 +219,7 @@ function render(){const app=document.getElementById('app');const show=CPS.filter
        <label><input type="radio" name="m-${cur}" value="enough" ${mn.stance==='enough'?'checked':''}>✔ 覆盖够了</label>
        <label class="d"><input type="radio" name="m-${cur}" value="missing" ${mn.stance==='missing'?'checked':''}>➕ 还缺（写在下面）</label>
        <span class="saved" id="msv-${cur}">已存</span></div>
-      <textarea id="mt-${cur}" placeholder="缺什么写这里，例：漏了「同一雇员同一天跨两个假种各请半天」的组合">${(mn.text||'').replace(/</g,'&lt;')}</textarea>
+      <textarea id="mt-${cur}" placeholder="缺什么写这里，例：漏了「同一条记录被两个入口并发修改」这种组合场景">${(mn.text||'').replace(/</g,'&lt;')}</textarea>
     </div></div>`}
   const n=N.cp[c.id]||{};const p=(c.meta.match(/P\d/)||[''])[0];
   h+=`<div class="card ${p} ${n.stance?(n.stance==='drop'?'drop':'done'):''}" id="c-${c.id}">

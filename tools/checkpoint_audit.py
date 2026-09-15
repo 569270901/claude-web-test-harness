@@ -168,7 +168,7 @@ def main():
         print(f"\n⚠️ 完全没有溯源的检查点 {len(noref)} 条: {' '.join(noref[:20])}")
 
     if "--merge" in sys.argv:
-        out = [f"# PTO V1.0 检查点清单（GATE 0 审核介质）\n",
+        out = [f"# {td.name} · 检查点清单（GATE 0 审核介质）\n",
                f"> 共 **{len(cps)}** 条检查点，🔒 阻塞 {sum(c['blocked'] for c in cps)} 条。\n",
                "> 粒度：一条 = 一个模块 × 一个校验类型。`←` 回指 PRD (5) 章节号（评审页可展开原文）。\n",
                "> `🔒` = 该测但缺前提，照写不删，内联带 DBT-ID。\n"]
