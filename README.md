@@ -39,7 +39,7 @@ never mention simply shows up as "one fewer test case" in the final list, and a 
 by itself never draws anyone's attention.
 
 So a step is inserted in between: break the requirements down into a **checklist** first
-(6 categories, in plain terms):
+(7 categories, in plain terms):
 
 | Category | What it checks |
 |---|---|
@@ -49,6 +49,7 @@ So a step is inserted in between: break the requirements down into a **checklist
 | Business rules | What extra constraints apply |
 | User journeys | What the user actually clicks, and what happens next |
 | Impact scope | Whether this change could affect other features |
+| Element specs | What each on-screen element should look like in each situation — its exact wording, and whether it should even show up for this role, in this state |
 
 Anything the checklist can't fill in or isn't sure about **is flagged as-is** — never silently
 skipped or made up. All you need to do is scan this list — "is this category's scope right",
@@ -57,6 +58,12 @@ it be allowed or not" — which is far easier than being handed a list of dozens
 afterward and having to judge by feel whether "everything" was covered. **Judging whether one
 line is correct is something you're good at; judging whether a whole list is complete is
 exactly where things get missed.**
+
+And you don't even have to look at every flagged item: each one is first sorted into
+"**someone has to decide this**" versus "**we'll just see when the build lands**", and only the
+first kind is put in front of you. (Why: an earlier version pushed every single open question at
+the user indiscriminately — one small feature produced 33 cards to decide on, which nobody can
+get through. A review nobody finishes is the same as no review at all.)
 
 Once you confirm the checklist, the harness generates the formal test cases and the
 "what the user actually does" step-by-step description from it — that step also pauses for
@@ -246,19 +253,62 @@ you just need to nod or correct it at two checkpoints.**
 
 ---
 
+## The console — where you do your confirming
+
+The two confirmation points don't have to happen by reading raw markdown in a terminal. There's
+a small local console (pure standard library, nothing to install) that opens in your browser:
+
+```bash
+python3 tools/qa_console.py            # one port, pick the version → the feature → the view
+```
+
+What it gives you:
+
+- **The open questions arrive pre-sorted.** Anything the harness is unsure about gets split into
+  "someone has to decide this" and "we'll find out by looking once it's built", and only the
+  first kind is put in front of you. This exists because an earlier version pushed all of them at
+  the user equally — one small feature produced **33 cards to decide on**, and a pile that big
+  just doesn't get read. Your decisions are saved as a separate file; the checklist itself is
+  never edited behind your back, and a snapshot is taken before anything is written back.
+- **You can actually edit the test cases, not just approve or reject them.** Spotting a case
+  that's wrong, or one that's missing, and being able to fix it on the spot is the whole point of
+  a review. Every edit is keyed by case ID (not line number, which drifts), snapshots the file
+  the first time you touch it, and appends to an audit log recording the previous value — so
+  everything is reversible and traceable.
+- **Test results fill themselves in, by case ID.** Add `-p tools.pytest_case_ledger` to your
+  pytest run and every result is matched back to the case it belongs to (it just needs the case
+  ID in the test's docstring — no changes to your existing tests). Automated runs and manual runs
+  are kept as **two separate lanes**, and when the two disagree about the same case, that row is
+  **highlighted** — a case that passes by hand and fails in CI (or the reverse) is exactly where
+  bugs like to hide.
+- **A hard-rule scan before you commit.** `scripts/check_compliance.py` statically flags things
+  like deleted assertions, placeholder expected values, and banned selector patterns. Install it
+  as a git hook once and it runs on every commit:
+
+  ```bash
+  bash scripts/install_hooks.sh
+  ```
+
+  The rules live in `configs/compliance-rules.json` — most default to warnings rather than errors
+  on purpose, because a scanner that cries wolf just teaches people to suppress it.
+
+---
+
 ## Layout
 
 ```
 .claude/agents/               Definitions for the 4 roles (page explorer / checklist+test-case design / test writing / review)
 artifacts/README.md           Overview: document formats, statuses, confirmation points, hard rules, progress log
 artifacts/agents/             Detailed spec for all 5 roles (incl. the dispatcher) + decomposition.md (checklist methodology)
-tools/                        Helper scripts: a web UI for annotating the checklist, and a tool that audits for missed/fabricated references
+tools/                        The console (see the section above): review the checklist, edit test cases, record and compare test results
+scripts/                      journal.py (run log), check_compliance.py (hard-rule scanner), install_hooks.sh (installs the git hook)
+configs/                      Rule config for the scanner + console settings — edit these instead of the scripts
+hooks/                        The pre-commit hook itself (installed by scripts/install_hooks.sh)
 page_map/                     Page maps (YAML describing the currently deployed page elements/selectors)
 data/                         Test data
 tests/                        Test code
-scripts/journal.py            Run log: automatic recording + each role's own account of "why it judged this way", for post-hoc review
 CLAUDE.md                     Project conventions (declare your own directories/commands/login here)
-rule.md                       Technical pitfalls to avoid (selector conventions, timing issues)
+rule.md                       Technical pitfalls to avoid, in three sections: generic engineering lessons / component-library quirks / demo-site-only facts (delete that last one when you plug in your own site)
 ```
 
 Every task run is archived under `artifacts/<task_id>/` with every document produced along the

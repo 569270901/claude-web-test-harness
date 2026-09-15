@@ -17,8 +17,10 @@ description: 读 confirmed cases.md + flow.md，生成测试代码 + 数据，�
 ## 入口前置检查（不满足就拒绝执行，写 status=blocked）
 
 1. `cases.md` 存在且 `status: confirmed`（阶段1）/ `ops_review.md` 存在且 `status: confirmed`（阶段2）
-2. cases.md 的 page_ref 都能在 page_map 找到
-3. 测试环境可访问（见 `CLAUDE.md`）
+2. **只读 `exec: auto` 的行**——`manual` / `blocked` 的行在本次任务里当作不存在（用户在 GATE 1
+   标的例外），它们既不进脚本也不进覆盖率分母
+3. cases.md 中 **`exec: auto` 的那些行**的 page_ref 都能在 page_map 找到
+4. 测试环境可访问（见 `CLAUDE.md`）
 
 ## 启动后第一件事
 
@@ -54,6 +56,8 @@ description: 读 confirmed cases.md + flow.md，生成测试代码 + 数据，�
 
 ## 红线（必守）
 
+- ❌ **禁止为 `exec: manual` / `exec: blocked` 的行写脚本**，也**禁止把它们算进覆盖率分母**。
+  `exec` 是用户在 GATE 1 定的硬契约，不是建议；不服就在 impl.md 里写明理由交还用户，不许自己改
 - ❌ **禁止删除/弱化断言**，禁止把 expected 改成空/"0"/"-" 来匹配实际值
 - ❌ selector 不用通配 / `:nth-child` / xpath 位置索引
 - ❌ 不直接改 page_map（例外：cases.md 的 page_ref 引用写错可改引用本身）

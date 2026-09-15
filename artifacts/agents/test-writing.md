@@ -54,8 +54,35 @@ created_at: ...
 
 启动时必须验证：
 1. `cases.md` 存在且 `status=confirmed`，否则拒绝执行
-2. 相关 page_map yaml 存在且 cases.md 的 `page_ref` 都能在 page_map 中找到
-3. 测试环境可访问（见 `CLAUDE.md` 的 base_url / 登录约定）
+2. **先按 `exec` 列过滤出本次的工作集**（见下一节），后续检查只针对工作集内的行
+3. 工作集内每条的 `page_ref` 都能在相关 page_map yaml 中找到
+4. 测试环境可访问（见 `CLAUDE.md` 的 base_url / 登录约定）
+
+---
+
+## `exec` 列：消费端怎么用（工作集 = 只有 `auto`）
+
+cases.md 每行带一个 `exec` 列，取值 `auto | manual | blocked`：
+
+| 值 | 含义 | 你该怎么做 |
+|---|---|---|
+| `auto` | 可自动化（**默认，绝大多数**） | 正常写脚本 |
+| `manual` | 只能人工执行（依赖真实邮件 / 支付回调 / 外部系统 / 人眼判断的视觉效果） | **不写脚本**，跳过 |
+| `blocked` | 当前环境跑不了（依赖尚未就绪的前置能力或数据） | **不写脚本**，跳过 |
+
+生产端（test-case-design）一律先填 `auto`，`manual` / `blocked` **全部是用户在 GATE 1 亲手标的例外**
+——所以它是用户的裁决，不是 agent 的建议，你无权改写、也无权"顺手试一下"。
+
+两条硬约束的唯一出处在系统提示（`.claude/agents/test-writing.md` 的红线）：
+**不得为非 `auto` 行生成脚本**、**不得把它们计入覆盖率分母**。这里只补充怎么落地：
+
+- **覆盖率分母 = 工作集行数**，即 `exec == auto` 的行数，不是 cases.md 总行数。
+  把永远跑不了的行算进分母，覆盖率会被永久拖成假低，从此这个数字就没人看了——
+  指标一旦失真就等于没有指标。
+- **跳过的行要显式记账，不能静默消失**：在 impl.md 里列出被跳过的用例 ID + 它的 `exec` 值，
+  让人一眼能对上"cases.md 20 条、脚本 17 条"这个差额的来源。
+- 对非 `auto` 行，**连 page_ref 校验都不用做**——它本来就不进脚本，因它缺地图而报 blocked
+  是自己给自己制造阻塞。
 
 ---
 
@@ -134,6 +161,10 @@ outputs:
     duration_sec: 40
     test_ids:
       - "tests/test_search.py::test_search_by_keyword"
+  cases_in_scope: 17                 # exec=auto 的行数 = 覆盖率分母
+  cases_skipped:                     # 非 auto 行，显式记账（不写脚本、不进分母）
+    - "TC-SEARCH-009 (manual: 需人工核对邮件正文)"
+    - "TC-SEARCH-014 (blocked: 依赖尚未开放的批量导入)"
   self_repair_rounds: 1              # 自修了几轮
   review_rounds: 2                   # 调过几次 review
   debt_settled: 4                    # 本轮实测掉的解构债条数（decomp.md 的 DBT-00x）

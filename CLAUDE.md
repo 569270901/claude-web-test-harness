@@ -14,6 +14,17 @@
 
 发现新知识主动回写：技术坑 → `rule.md`；页面元素变化 → 对应 `page_map/*.yaml`。
 
+**写完测试代码后跑一次红线静态扫描**（秒级，纯标准库）：
+
+```bash
+python3 scripts/check_compliance.py            # 扫全仓
+python3 scripts/check_compliance.py --staged   # 只扫本次待提交的文件
+```
+
+`error` 必须修（不要 noqa 了事），`warn` 打印不阻断。规则在 `configs/compliance-rules.json`，
+**接入自己的项目时按需增删**——里面有几条是组件库特有的，文件内 `$design_notes` 标注了哪些要换。
+想让它在 commit 前自动拦截：`bash scripts/install_hooks.sh` 装 git pre-commit hook。
+
 ---
 
 ## 项目约定（← 接入时改这里）
