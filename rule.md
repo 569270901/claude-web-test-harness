@@ -248,6 +248,12 @@ session 级 fixture 返回的 page 跨用例会失效。正解是**缓存登录�
 
 > ⚠️ 本节只对本仓库 demo 用的站点成立。**接入你自己的项目时请整节删除**，
 > 换成你在探索中实测到的本站点事实。
+>
+> 本节留在这里是当**范例**用的——让你看清「站点特有事实」该记成什么颗粒度（具体到
+> selector、到触发条件、到"哪条路径能直链哪条不能"，而不是"这个站点有点卡"这种没法
+> 落成断言的话）。下面这些结论来自一次针对 `fragdar.cn` 的探索任务，**对应的测试代码
+> 未随仓库分发**，所以你在 `tests/` 下找不到它们；仓库自带的可运行示例是 TesterHome
+> 那套（见 README）。
 
 - **submit 按钮默认 disabled**：`button[type=submit]`（"Read radar"）只有在输入合法 17 位 Steam64 ID（`7656119...` 段）时才 enabled；输入用户名时永远 disabled。`page.fill()` 触发不一定能让 React 更新 enabled 态，用 `locator.type(q, delay=...)` 模拟真实键入更稳。
 - **用户名查询必须走 suggestion 下拉**：键入后约 1s（防抖）出现 typeahead 下拉 `ul li button`（项形如「名字 / #短ID」），**点选某项**才导航到 `/player/<完整Steam64ID>`。用户名不能靠 submit/Enter 进结果页。
