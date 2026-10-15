@@ -400,7 +400,8 @@ def cmd_apply(task_id: str) -> None:
                           f"gate0_verdicts: {p['verdicts'].name}\nbaseline_decomp:", 1)
         p["decomp"].write_text(txt, encoding="utf-8")
         print("✓ decomp.md frontmatter: status → gate0_answered（内容未动）")
-    print("\n下一步：orchestrator 派 test-case-design 增补轮，读裁决回填 → status: confirmed")
+    print("\n下一步：orchestrator 派 test-case-design 增补轮，读裁决回填 → status 改回 pending_review"
+          "\n        → 用户扫一眼回复「确认」→ confirmed（只有用户能确认，agent 不自行 confirmed）")
 
 
 def cmd_stats(task_id: str) -> None:
@@ -688,6 +689,12 @@ if __name__ == "__main__":
         print(__doc__ + "\n用法：serve <task> [port] | apply <task> | stats <task>")
         sys.exit(1)
     cmd, task = sys.argv[1], sys.argv[2]
+    try:
+        # 先探一次 decomp.md：缺文件时给友好提示（见 gate_review.parse_md），不要一串 traceback
+        parse_md(paths(task)["decomp"])
+    except FileNotFoundError as e:
+        print(e)
+        sys.exit(2)
     if cmd == "apply":
         cmd_apply(task)
     elif cmd == "stats":

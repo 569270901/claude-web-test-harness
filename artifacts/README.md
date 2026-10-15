@@ -60,7 +60,7 @@ artifacts/
     state.md                         ← orchestrator 维护
     sync.md                          ← page-map-sync 产出
     decomp.md                        ← test-case-design 阶段1 产出（结构化解构层：7 张表，GATE 0 单独审）
-    cases.md                         ← test-case-design 阶段2 产出（用例表，每条带 exec + derived_from 回指 decomp 表行）
+    cases.md                         ← test-case-design 阶段2 产出（用例表，每条带 exec + derived_from 回指 decomp 表行 + prd_ref 回指原始依据）
     flow.md                          ← test-case-design 阶段2 产出（操作流程对照单，GATE 1 与 cases.md 一并审）
     ops_review.md                    ← test-writing 阶段1产出（与 confirmed flow.md 的偏差清单；偏差=0 不触发 gate）
     impl.md                          ← test-writing 阶段2产出
@@ -99,6 +99,8 @@ created_at: 2026-06-22T10:30:00Z
 - `pending` — 还没开始
 - `in_progress` — 干活中
 - `pending_review` — 等用户介入（GATE）
+- `gate0_answered` — 用户已在评审控制台对 decomp.md 逐条裁决并 apply（仅 decomp.md 用）；
+  裁决在 `gate0_verdicts.json`，表格尚未回填 → orchestrator 派 test-case-design 增补轮回填后改回 `pending_review`
 - `confirmed` — 用户已确认（仅 decomp.md / cases.md / ops_review.md 用）
 - `completed` — 完成，可接力
 - `failed` — 出错，需人介入
@@ -149,7 +151,8 @@ created_at: 2026-06-22T10:30:00Z
 
 ## cases.md 的列 + `exec` 跨 agent 契约
 
-cases.md 每行的列：`# | ID | 优先级 | exec | 测试点 | 前置 | 步骤 | 期望 | page_ref | derived_from`。
+cases.md 每行的列：`# | ID | 优先级 | exec | 测试点 | 前置 | 步骤 | 期望 | page_ref | derived_from | prd_ref`。
+`derived_from` 回指 decomp 表行（agent 对账用），`prd_ref` 回指原始依据（需求文档章节 / 设计图 / 实测 / 用户，给人核对用）。
 （各列怎么填见 [agents/test-case-design.md](agents/test-case-design.md)，此处只记跨 agent 的不变量。）
 
 `exec` ∈ `auto | manual | blocked`，**生产端 test-case-design 一律先填 `auto`，例外由用户在

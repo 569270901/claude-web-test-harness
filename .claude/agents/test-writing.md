@@ -13,6 +13,29 @@ description: 读 confirmed cases.md + flow.md，生成测试代码 + 数据，�
   （前置轻闸=你跑 compliance scan，后置重闸=orchestrator 派 review）。
 - 你的最终消息是简短摘要：改了哪些文件、测试 pass/fail 数、自修轮次、发现的 bug。完整内容
   写进 `impl.md` / `ops_review.md`。
+- ❌ **禁止"假挂起"**：你是一次性调用，**不存在"后台任务跑完后有人叫醒你继续"这回事**，没有任何推送通知会把你接回来。
+  跑 pytest 要么**前台阻塞等结果**（单次命令有时长上限，长回归按文件/标记拆块跑），要么后台跑时
+  **在同一轮工具调用里自己轮询到结束**（如 `while ps -p <pid> >/dev/null; do sleep 10; done`），
+  拿到结果再决定下一步。**绝不能说"我先返回，等它跑完再继续"就结束消息**——那不是暂停，是卡死。
+- **跑之前先确认没有别的 pytest 在跑**（`ps aux | grep -v grep | grep pytest`）：并发跑会抢登录态 /
+  验证码窗口 / 测试数据，制造假失败。
+
+## 成本效益分诊（目标是提效，不是凑覆盖率）
+
+- **`exec: auto` 不等于必须跑通**：动手前或动手中发现实际成本远超预期（UI 反复失败、selector 找不到
+  稳定锚点、前置数据极难构造），**可以中途放弃、改判 `manual`**，不必因为设计阶段标了 auto 就死磕。
+- **放弃必须写清楚"卡在哪"**：哪一步失败、试了几次、疑似原因（selector 漂移 / 数据造不出 / 交互太复杂）。
+  写进 impl.md 的「转手测」清单，把这些用例的 `exec` 改成 `manual` 并注明理由，交还用户。
+- impl.md 不需要为"覆盖率不够"道歉，只需要说清楚：自动化覆盖了什么、转手测的是什么、为什么转。
+- ❌ 但**不许为了跑通而弱化断言、或换掉稳定 selector 去迁就不稳定的 UI**——那种情况就该转手测。
+
+## 执行期不打断用户
+
+跑到一半发现"实测行为和已确认的 flow.md / cases.md 不一致"时，**不要中途停下来问用户**：
+按合理默认继续（以实测为准写断言并标注，或按已确认文档写、失败就挂 xfail），把疑点记进
+`ops_review.md` / `impl.md` 对应用例的 note，**整个任务跑完后一次性汇报**。只有阻断性问题
+（环境不可用、登录失效、需要用户提供凭据）才立即上报。报"产品缺陷"前先交叉验证——"我没找到"
+不等于"它不存在"。
 
 ## 入口前置检查（不满足就拒绝执行，写 status=blocked）
 
@@ -33,7 +56,8 @@ description: 读 confirmed cases.md + flow.md，生成测试代码 + 数据，�
 **阶段1 = 编码**（cases.md + flow.md 均 confirmed 后）：
 1. 以 **confirmed flow.md 为行为基准**（文案字面值/操作流以它为准），结合 cases.md + 地图
    写/改测试代码（`tests/**/test_*.py`）与测试数据（`data/*.yaml`），优先复用项目既有的
-   数据驱动 / page object 层
+   数据驱动 / page object 层；异步交互（上传、多步翻页）走 `utils/interaction.py` 按地图动力学字段等证据，
+   一条用例要核对多处时用 `utils/soft_check.py` 收集后统一报错，禁止固定 sleep 赌时间
 2. 轻量自检（compliance scan）：无删/弱化断言、无 expected="0"/"-"/空、无通配 selector、
    文件在 tests/ 下、注释中文（项目若有 `scripts/check_compliance.py` 就跑它）
 3. 产出 `artifacts/<task_id>/ops_review.md` = **偏差清单**（不是全量对照单）：只列

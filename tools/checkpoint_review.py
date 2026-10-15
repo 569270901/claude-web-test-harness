@@ -1,6 +1,11 @@
 # -*- coding: utf-8 -*-
 """检查点清单 · GATE 0 评审服务器（纯标准库）
 
+⚠️ 实验性工具，不在主流程里：GATE 0 的正式审核介质是 decomp.md + 评审控制台
+（`tools/qa_console.py`，见 artifacts/agents/orchestrator.md「Gate 处理」）。本工具对应的
+"粗粒度检查点清单 checkpoints.md"还没有进任何 agent 契约，新人可以忽略它。
+
+
     python3 tools/checkpoint_review.py artifacts/<task_id> [端口]      # 默认 8878
 
 与 decomp_review.py 的分工：

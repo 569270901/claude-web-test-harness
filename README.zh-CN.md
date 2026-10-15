@@ -4,7 +4,7 @@
 
 一套用 [Claude Code](https://claude.com/claude-code) 驱动的多智能体 UI 自动化测试框架。放进你的 Web 项目里，跟它说一句"帮我测一下 xxx"，它会自己去摸页面、列检查点、写用例、写代码、跑起来——**关键地方停下来让你确认，不会自作主张**。
 
-> 演示站点用 [TesterHome](https://testerhome.com)（QA 社区论坛），demo 流程全部**只读**（浏览/搜索/断言渲染），不涉及注册登录发帖。
+> 演示站点用 [TesterHome](https://testerhome.com)（QA 社区论坛），demo 流程全部**只读**（浏览话题列表/打开帖子/断言渲染），不涉及注册登录发帖。
 
 ---
 
@@ -115,7 +115,7 @@ python -m playwright install chromium
 python -m pytest tests/ -v
 
 # 3. 在本项目目录打开 Claude Code，对主对话说一句话即可启动：
-#    「为 TesterHome 首页+搜索设计一套只读测试并写出来」
+#    「为 TesterHome 首页（话题列表 + 帖子详情）设计一套只读测试并写出来」
 #    它会自己按 摸页面 → 列检查点(你确认) → 生成用例(你确认) → 写代码自跑 → 复查 这条流程走
 ```
 
@@ -188,6 +188,24 @@ rm -rf artifacts/2026-*               # 旧任务归档（保留 artifacts/READM
 
 ---
 
+## 输入准备：需求文档、设计图、只有网站时
+
+harness 按你手里有什么自动选打法（A / B / C 档，见 [`artifacts/GLOSSARY.md`](artifacts/GLOSSARY.md)），你只需要把手上有的东西交出来：
+
+| 你手里有 | 怎么交给它 | 说明 |
+|---|---|---|
+| **需求文档**（Markdown / 在线文档导出的 md / PDF / Word） | 对话里直接给路径：「PRD 在 `<路径>`」，agent 会复制入档到 `artifacts/<task_id>/input/` | 在线文档导出的 md 常把图片内嵌成 base64（一份几 MB），先跑 `python3 tools/prd_intake.py <task_id> <文件>` 拆成"正文 + 图片"，否则正文会被 base64 淹没 |
+| **设计图** | 每屏 / 每个弹窗导出一张 PNG（**2x**，要能逐字看清文案），放进 `artifacts/<task_id>/ui_design/` | 有错误态 / 空态 / hover 态设计的也一起导出。Figma：选中 Frame → Export PNG 2x；如果你的 agent 工具接了 Figma MCP，也可以让它按节点拉图存进这个目录 |
+| **只有网站，没有需求文档** | 不用准备文件，直接说「没有需求文档，帮我摸清 <页面> 的 <功能>」 | 它会先探页面：字段约束、校验文案、各状态下能点什么都实测取证，再按实测结果解构。确保环境能访问；要登录的先按上文第 2 步加登录 fixture |
+| **版本号**（可选） | 说一句「这是 v1.4 的需求」 | 写进 `state.md` 的 `version:`，控制台按版本分组 |
+
+几点约定：
+
+- `input/` 和 `ui_design/` 都在 `.gitignore` 里：**需求文档和设计图只留本地，不进仓库**。
+- 只有网站时，它记录的是"产品**现在**的行为"，不是"产品**应该**的行为"。GATE 0 会专门问你：哪些实测行为其实是 bug。
+- 只读探索以外的操作（正式提交、删除）它不会在探索阶段触发，会标"未实测"留给你判断。
+- 确认过的业务结论会回写到 `specs/`（产品知识库），同一模块下次直接复用，越测越省力。
+
 ## 🚀 然后就是「说人话」驱动测试
 
 这是整套 harness 的核心用法——**接入完成后，你不用再手写一行测试代码，只要用自然语言描述要测什么**：
@@ -227,8 +245,10 @@ python3 tools/qa_console.py            # 单端口，三级导航：版本 → �
 - **用例定稿后可以直接在控制台增删改**，不是只有"通过 / 打回"两个动作——看到用例写错了、
   少一条，当场能改才叫评审。每次改动**按用例 ID 定位**（不按行号，行号会随编辑漂移），
   首次编辑前自动存快照，改动连同改前值写进只增不改的审计日志，可逐条回溯、可回滚。
-- **测试结果按用例 ID 自动回填。** pytest 加一个 `-p tools.pytest_case_ledger` 就行，
+- **测试结果按用例 ID 自动回填。** 台账插件已在根 `conftest.py` 默认注册，直接跑 pytest 就行，
   它会把每条结果认领回对应的用例（测试 docstring 里写了用例 ID 即可，**存量测试一行不用改**）。
+  已知缺陷（`xfail`）单独记成"已知缺陷"，不会混进新故障；标了已知缺陷却意外通过的，单独提示
+  "疑似已修复，请人复核"。
   自动化执行和人工执行分**两条泳道**，同一条用例两边**结论不一致时高亮**——
   手测过、CI 挂（或者反过来）的那一格，正是 bug 最好的藏身处。
 - **提交前有红线静态扫描。** `scripts/check_compliance.py` 会扫出删断言、expected 填占位值、
@@ -240,6 +260,31 @@ python3 tools/qa_console.py            # 单端口，三级导航：版本 → �
 
   规则在 `configs/compliance-rules.json` 里，默认大多是 warn 而不是 error——
   这是故意的：一个动不动就误伤的扫描器，只会教会所有人无脑跳过它。
+- **用例可以导出成 Excel 交给别人执行。** 导出时去掉 `page_ref` / `derived_from` 这类内部列，
+  保留"依据"（需求章节 / 设计图 / 实测），`exec` 翻成"自动化 / 手工 / 本轮不测"：
+
+  ```bash
+  python3 tools/cases_export.py <task_id>                 # → artifacts/<task_id>/cases_export.xlsx
+  python3 tools/cases_export.py <task_id> --only-manual   # 只导出要手工执行的
+  python3 tools/cases_export.py <task_id> --csv           # CSV（Excel 双击打开不乱码）
+  ```
+
+## 长回归：断点续跑与撞墙止损
+
+两个插件已在根 `conftest.py` 注册，**默认关闭**，按需开：
+
+```bash
+# 断点续跑：每条用例跑完立即落盘；被环境杀掉 / 电脑休眠后，原样重跑同一条命令，只补没跑完的
+python -m pytest tests/ --batch nightly
+python -m pytest tests/ --batch nightly --batch-fresh     # 清空该批次记录，从头跑
+
+# 撞墙止损：同一个定位连续失败 N 条、或连续失败 M 条就停批，不再"撞墙后陪跑"几十分钟
+python -m pytest tests/ --guard --guard-same=2 --guard-consecutive=4
+```
+
+- 续跑判定：通过 / 已知缺陷 / 跳过的下次略过；中途发生过休眠的那条必重跑。有顺序依赖的用例要一起重跑。
+- 止损不计入已知缺陷（`xfail`）；停批原因记在 `artifacts/_runs/guard_last.json`。
+- 插件写在 `pytest_plugins` 里而不是 `pytest.ini` 的 `addopts`，所以调试时 `--override-ini="addopts="` 也不会让它们失效。
 
 ---
 
@@ -249,14 +294,17 @@ python3 tools/qa_console.py            # 单端口，三级导航：版本 → �
 .claude/agents/               4 个角色的定义（摸页面 / 列检查点+写用例 / 写代码 / 复查）
 artifacts/README.md           总览：文档格式、状态、确认点、红线、进度日志
 artifacts/agents/             5 个角色的详细说明（含总调度）+ decomposition.md（检查点清单方法论）
-tools/                        控制台（见上）：评审检查点、增删改用例、记录与比对执行结果
+tools/                        控制台（见上）：评审检查点、增删改用例、导出 Excel、记录与比对执行结果；续跑 / 止损插件
+utils/                        测试代码可复用的 helper：interaction（按页面地图的动力学字段等异步证据）、soft_check（软断言）、auth_state（按角色缓存登录态）
 scripts/                      journal.py（运行日志）、check_compliance.py（红线静态扫描）、install_hooks.sh（装 git hook）
 configs/                      扫描规则与控制台配置——改这里，不用改脚本
 hooks/                        pre-commit hook 本体（由 scripts/install_hooks.sh 安装）
 page_map/                     页面地图（YAML，描述当前部署的页面元素/selector）
 data/                         测试数据
 tests/                        测试代码
-CLAUDE.md                     项目约定（接入方在此声明自己的目录/命令/登录）
+artifacts/GLOSSARY.md         术语表（GATE、档位、置信度标记、exec 等一句话解释）
+specs/                        产品知识库（已确认的业务规则 / 状态流转 / 字段约束，按模块一个 .md）
+CLAUDE.md                     项目约定（接入方在此声明自己的目录/命令/登录）；主对话从这里得知自己是总调度
 rule.md                       技术避坑，分三区：通用工程经验 / 组件库特有 / demo 站点特有（接入自己项目时把最后一区删掉）
 ```
 

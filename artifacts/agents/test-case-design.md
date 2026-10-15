@@ -64,6 +64,11 @@
 - **粒度**：一个测试点 ≈ 一个 `def test_xxx`
 - **每个测试点关联 page_map 元素**（`page_ref` 字段）
 - **每个测试点回指素材行**（`derived_from` 字段，如 `②-F07` / `⑦-C08`）
+- **每个测试点回指原始依据**（`prd_ref` 字段）：照抄 `derived_from` 那几行在 decomp 表里的「来源」，
+  如 `PRD §3.2`、`设计图 p4`、`实测 2026-06-30`、`用户（GATE 0）`、`知识库 specs/<模块>.md`。
+  `derived_from` 是给 agent 对账用的内部回指；`prd_ref` 是给**人**看的——评审人和手工执行人
+  不用打开 decomp.md 就能回到需求原文核对。**不许拿自己的中间产物当依据**：来源只能是需求文档 /
+  设计图 / 实测 / 用户 / 知识库，不能写"见 decomp 表②"（那是循环论证）
 
 ---
 
@@ -127,11 +132,11 @@ created_at: ...
 
 > **用户审阅区**：请在表格中编辑/补充/删除测试点。完成后回复"确认"或"OK"，本 artifact status 改为 confirmed，主控才会推进到 test-writing。
 
-| # | ID | 优先级 | exec | 测试点 | 前置 | 步骤 | 期望 | page_ref | derived_from |
-|---|----|------:|------|--------|------|------|------|----------|--------------|
-| 1 | TC-SEARCH-001 | P0 | auto | 验证按关键词搜索后，结果列表出现含该关键词的话题 | 直接访问 /search | 1. 输入关键词 2. 提交 | 结果区出现含关键词的话题标题 | page_map/testerhome/search.yaml: input_query | ①-A01, ⑤-J01 |
-| 2 | TC-SEARCH-002 | P1 | auto | 验证不填关键词直接提交搜索时，页面提示需要输入关键词 | 在搜索页 | 1. 不填直接提交 | 停留原页 / 提示需输入关键词 | page_map/testerhome/search.yaml: input_query, btn_submit | ②-F03 |
-| 3 | TC-SEARCH-003 | P1 | auto | 验证搜索无结果时，整屏控件状态正确（空态提示出现、分页器隐藏） | 搜索一个无匹配的关键词 | 1. 提交搜索 | 空态文案 "没有找到相关内容" 出现；分页器不存在 | page_map/testerhome/search.yaml: empty_hint, pager | ⑦-C04, ⑦-C05 |
+| # | ID | 优先级 | exec | 测试点 | 前置 | 步骤 | 期望 | page_ref | derived_from | prd_ref |
+|---|----|------:|------|--------|------|------|------|----------|--------------|---------|
+| 1 | TC-SEARCH-001 | P0 | auto | 验证按关键词搜索后，结果列表出现含该关键词的话题 | 直接访问 /search | 1. 输入关键词 2. 提交 | 结果区出现含关键词的话题标题 | page_map/testerhome/search.yaml: input_query | ①-A01, ⑤-J01 | 实测 |
+| 2 | TC-SEARCH-002 | P1 | auto | 验证不填关键词直接提交搜索时，页面提示需要输入关键词 | 在搜索页 | 1. 不填直接提交 | 停留原页 / 提示需输入关键词 | page_map/testerhome/search.yaml: input_query, btn_submit | ②-F03 | 实测 |
+| 3 | TC-SEARCH-003 | P1 | auto | 验证搜索无结果时，整屏控件状态正确（空态提示出现、分页器隐藏） | 搜索一个无匹配的关键词 | 1. 提交搜索 | 空态文案 "没有找到相关内容" 出现；分页器不存在 | page_map/testerhome/search.yaml: empty_hint, pager | ⑦-C04, ⑦-C05 | 实测 |
 
 ## `exec` 列（执行方式）
 

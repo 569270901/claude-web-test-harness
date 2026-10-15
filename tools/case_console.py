@@ -85,6 +85,7 @@ def load_cases(task_id: str) -> dict:
                 "map_gap": "⚠️待补" in pr,
                 "reuse": [x for x in re.findall(r"([\w/]+\.py(?:::\w+)?)", pr + " " + g("步骤"))],
                 "derived_from": g("derived_from"),
+                "prd_ref": g("prd_ref"),          # 原始依据（需求章节 / 设计图 / 实测 / 用户），给人回原文核对
                 "line_no": r["line_no"],
             })
         if got:
@@ -164,6 +165,8 @@ def cmd_stats(task_id: str) -> None:
     print(f"用例 {len(cs)} 条（{', '.join(g['title'].split('.')[0]+':'+str(g['count']) for g in d['groups'])}）\n")
     print(f"  自动化：通过 {n(lambda c: c['auto_status']=='passed')}"
           f" / 失败 {n(lambda c: c['auto_status'] in ('failed','error'))}"
+          f" / 已知缺陷(xfail) {n(lambda c: c['auto_status']=='xfailed')}"
+          f" / 疑似已修复(xpass strict) {n(lambda c: c['auto_status']=='xpassed_strict')}"
           f" / 未跑 {n(lambda c: not c['auto_status'])}")
     print(f"  人  工：通过 {n(lambda c: c['manual_status']=='pass')}"
           f" / 失败 {n(lambda c: c['manual_status']=='fail')}"
@@ -171,7 +174,7 @@ def cmd_stats(task_id: str) -> None:
           f" / 未执行 {n(lambda c: not c['manual_status'])}")
     print(f"  两边分歧：{n(lambda c: c['divergent'])} 条  ← 优先看这些")
     print(f"  卡在地图缺口：{n(lambda c: c['map_gap'])} 条（自动化跑不了，先走人工）")
-    cov = n(lambda c: c["auto_status"] == "passed" or c["manual_status"] == "pass")
+    cov = n(lambda c: c["auto_status"] in ("passed", "xfailed") or c["manual_status"] == "pass")
     print(f"\n  已验证（任一泳道通过）：{cov}/{len(cs)} = {cov/max(len(cs),1):.0%}")
 
 
@@ -249,7 +252,8 @@ main{max-width:1240px;margin:0 auto;padding:18px 20px 60px}
 .ttl{flex:1;min-width:240px}
 .pill{font-size:11px;padding:1.5px 7px;border-radius:3px;border:1px solid currentColor;flex:none;white-space:nowrap}
 .p-P0{color:var(--bad)}.p-P1{color:var(--warn)}.p-P2{color:var(--ink3)}
-.s-passed,.s-pass{color:var(--ok)}.s-failed,.s-fail,.s-error{color:var(--bad)}
+.s-passed,.s-pass,.s-xfailed{color:var(--ok)}.s-failed,.s-fail,.s-error,.s-xpassed_strict{color:var(--bad)}
+.s-xpassed{color:var(--warn)}
 .s-blocked{color:var(--warn)}.s-skip,.s-skipped{color:var(--ink3)}.s-none{color:var(--ink3);opacity:.6}
 .gap{color:var(--gap)}
 .bd{border-top:1px solid var(--rule);padding:14px;display:none}
@@ -291,7 +295,7 @@ let D=null,F='all',OPEN={};
 const $=s=>document.querySelector(s);
 const esc=s=>(s||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 const md=s=>esc(s).replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>').replace(/`([^`]+)`/g,'<code>$1</code>');
-const AS={passed:'通过',failed:'失败',error:'错误',skipped:'跳过'};
+const AS={passed:'通过',failed:'失败',error:'错误',skipped:'跳过',xfailed:'已知缺陷(预期失败)',xpassed:'意外通过',xpassed_strict:'⚠️意外通过(疑似已修复,待复核)'};
 const MS={pass:'通过',fail:'失败',blocked:'阻塞',skip:'跳过'};
 
 async function boot(){D=await (await fetch('/api/cases')).json();render()}
@@ -300,22 +304,23 @@ function pass(c){
   if(F==='all')return true;
   if(F==='undone')return !c.auto_status&&!c.manual_status;
   if(F==='div')return c.divergent;
-  if(F==='bad')return ['failed','error'].includes(c.auto_status)||c.manual_status==='fail';
+  if(F==='bad')return ['failed','error','xpassed_strict'].includes(c.auto_status)||c.manual_status==='fail';
   if(F==='gap')return c.map_gap;
-  if(F==='ok')return c.auto_status==='passed'||c.manual_status==='pass';
+  if(F==='ok')return ['passed','xfailed'].includes(c.auto_status)||c.manual_status==='pass';
   return true;
 }
 function render(){
   const cs=D.cases,n=f=>cs.filter(f).length;
   $('#task').textContent=D.task_id;
   $('#kpi').innerHTML=
-    `<span>自动 <b class="s-passed">${n(c=>c.auto_status==='passed')}</b> 过 / <b class="s-failed">${n(c=>['failed','error'].includes(c.auto_status))}</b> 败 / <b>${n(c=>!c.auto_status)}</b> 未跑</span>`+
+    `<span>自动 <b class="s-passed">${n(c=>c.auto_status==='passed')}</b> 过 / <b class="s-failed">${n(c=>['failed','error'].includes(c.auto_status))}</b> 败 / <b class="s-xfailed">${n(c=>c.auto_status==='xfailed')}</b> 已知缺陷 / <b>${n(c=>!c.auto_status)}</b> 未跑</span>`+
     `<span>人工 <b class="s-pass">${n(c=>c.manual_status==='pass')}</b> 过 / <b class="s-fail">${n(c=>c.manual_status==='fail')}</b> 败 / <b>${n(c=>!c.manual_status)}</b> 未执行</span>`+
     `<span>分歧 <b class="s-blocked">${n(c=>c.divergent)}</b></span>`+
-    `<span>已验证 <b>${n(c=>c.auto_status==='passed'||c.manual_status==='pass')}/${cs.length}</b></span>`;
+    `<span>已验证 <b>${n(c=>['passed','xfailed'].includes(c.auto_status)||c.manual_status==='pass')}/${cs.length}</b></span>`+
+    (n(c=>c.auto_status==='xpassed_strict')?`<span>⚠️疑似已修复 <b class="s-xpassed_strict">${n(c=>c.auto_status==='xpassed_strict')}</b>（xfail意外通过，待复核）</span>`:'');
   $('#fil').innerHTML=[['all','全部',cs.length],['undone','未执行',n(c=>!c.auto_status&&!c.manual_status)],
-    ['div','两边分歧',n(c=>c.divergent)],['bad','有失败',n(c=>['failed','error'].includes(c.auto_status)||c.manual_status==='fail')],
-    ['gap','卡地图缺口',n(c=>c.map_gap)],['ok','已验证',n(c=>c.auto_status==='passed'||c.manual_status==='pass')]]
+    ['div','两边分歧',n(c=>c.divergent)],['bad','有失败',n(c=>['failed','error','xpassed_strict'].includes(c.auto_status)||c.manual_status==='fail')],
+    ['gap','卡地图缺口',n(c=>c.map_gap)],['ok','已验证',n(c=>['passed','xfailed'].includes(c.auto_status)||c.manual_status==='pass')]]
     .map(([k,l,v])=>`<button class="${F===k?'on':''}" onclick="setF('${k}')">${l} ${v}</button>`).join('');
   $('#app').innerHTML=cs.filter(pass).map(card).join('')||'<div class="case"><div class="hd">这个筛选下没有用例。</div></div>';
 }
@@ -360,6 +365,7 @@ function card(c){
      `<dt>前置</dt><dd>${md(c.pre)||'—'}</dd>`+
      `<dt>步骤</dt><dd>${md(c.steps)||'—'}</dd>`+
      `<dt>期望</dt><dd>${md(c.expect)||'—'}</dd>`+
+     `<dt>依据</dt><dd>${md(c.prd_ref)||'—'}</dd>`+
      `<dt>page_ref</dt><dd>${md(c.page_ref)||'—'}</dd>`+
      `<dt>溯源</dt><dd class="mono" style="font-size:11.5px">${esc(c.derived_from)}　·　cases.md:${c.line_no}</dd></dl>`;
   h+='<div class="lanes">';

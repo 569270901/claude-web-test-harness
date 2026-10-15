@@ -94,6 +94,13 @@ def is_sep(line: str) -> bool:
 
 def parse_md(path: Path) -> dict:
     """把 decomp.md 切成 {frontmatter, sections:[{key,title,header,rows}]}。"""
+    if not path.exists():
+        # 新人最常见的第一步错误：任务还没跑到阶段1 就来开评审台。给可操作的提示，不抛 traceback
+        raise FileNotFoundError(
+            f"找不到 {path}\n"
+            f"  · 这个任务还没产出 {path.name}：先让对应 agent 跑完再来"
+            f"（decomp.md = test-case-design 阶段1 解构；cases.md = 阶段2 生成）\n"
+            f"  · 或者任务 ID / 路径写错了：看看 artifacts/ 下实际有哪些任务目录")
     text = path.read_text(encoding="utf-8")
     lines = text.splitlines()
 
@@ -390,6 +397,10 @@ if __name__ == "__main__":
         sys.exit(1)
     cmd, task = sys.argv[1], sys.argv[2]
     if cmd == "parse":
-        cmd_parse(task)
+        try:
+            cmd_parse(task)
+        except FileNotFoundError as e:
+            print(e)
+            sys.exit(2)
     else:
         print(f"（本文件只提供 parse 自检；{cmd} 在 tools/gate_review_ui.py 或 tools/qa_console.py）")

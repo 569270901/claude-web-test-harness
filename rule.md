@@ -44,7 +44,8 @@
 **规则**：文件上传 / 多步表单翻页 / 日期面板这类异步交互，等待条件要从**页面地图的动力学字段**读
 （元素的 `async.request / settled / gates`、流程的 `flows.steps`），等的是**证据**（某个请求落地、
 某个元素出现），不是固定 `sleep`。等不到证据时要**指名报错**（把当时页面上的校验错误文案打出来），
-绝不静默兜底。
+绝不静默兜底。现成实现见 `utils/interaction.py`（读 page_map 的 `async / gates / flows`，地图缺字段直接报错，
+不退回 sleep；组件库相关的默认 selector 集中在 `COMPONENT_DEFAULTS`，换组件库时用 `configure_components()` 覆盖）。
 
 **来源**：一次"多步表单翻页卡死"的排查 —— 上传接口还没落地就点了「下一步」，组件判必填为空
 **静默拦截**（零提示、停在原步），于是下一步的字段 30s 超时，真因和报错隔着一层。先用
@@ -187,7 +188,8 @@ assert row is not None, "前置条件不满足：未找到目标行（需先通�
 - 长回归**按文件 / 条数分块**，每块控制在 **20 分钟以内**
 - 被杀后**从断点续**：比对日志里已出结果的用例名，只跑剩下的
 - 要 traceback 时**单独跑那几条失败用例**，别指望在大批次里拿到
-- 跑批之间**别并发**（会撞下面那条的验证码窗口）
+- 跑批之间**别并发**（会撞下面那条的验证码窗口）；跑之前 `ps aux | grep -v grep | grep pytest` 确认没有别的在跑
+- 工具已就位：`--batch <名字>` 断点续跑（`tools/pytest_resume.py`），`--guard` 撞墙止损（`tools/pytest_guard.py`），用法见 README「长回归」
 
 ### 登录态要复用，绝不能每条用例都重新登录
 
@@ -205,7 +207,208 @@ session 级 fixture 返回的 page 跨用例会失效。正解是**缓存登录�
 后续用例把 cookie + localStorage **注入各自的新 context**，跳过验证码；注入后校验登录态，
 失效则自动回落重新登录。
 **兜底**：取验证码的工具函数加去重守卫 —— 同一账号上次用过的码，等到下个窗口再取。
+**现成实现**：`utils/auth_state.py` 的 `AuthStateCache`（登录动作和"是否已登录"判断由你传回调，验证码可选），
+接法见根 `conftest.py` 里的注释示例。
 > 会"变成另一个账号"的用例（如注册新账号）自己另起 page 独立登录，不进缓存、不污染复用。
+
+---
+
+## 取证与判断（补充）
+
+### "点了没反应"先抓 pageerror，别换十种点击姿势
+
+**规则**：按钮 / tab 点了**完全没反应**（状态不变、URL 不变、零网络请求、零可见报错）时，第一件事是
+`page.on("pageerror", ...)` 抓前端异常栈，**不是**换 click / force / 坐标点击 / JS click / 键盘挨个试，
+更不是直接判"产品缺陷"。
+
+**真实发生过的根因**：从一个**不规范的入口 URL** 进入详情页（页面照样渲染，看不出问题），前端路由在
+拼子路由时匹配失败、抛出被生产包裁掉 message 的 `Invariant failed`，点击事件被吞掉。六种点击方式
+全部无效——因为它们都不是问题所在。用规范 URL 重新进入后一切正常。
+
+**排查顺序**：pageerror 栈 → 栈里出现 `navigate` / `buildLocation` / `resolve` 一类字样说明是路由问题 →
+去前端产物里查真实注册的路由，用规范 URL 重进，而不是继续在 DOM 层试。
+
+**连带**：page_map 的 `url` / `entry` 必须写**规范路由**；已知"能渲染但会坏交互"的路径写进
+`forbidden_url`，否则下游用例会重蹈覆辙。
+
+### 文案对不上时先打 `repr()`，别凭肉眼读
+
+**规则**：`text=` / `:text-is()` 精确匹配等不到时，报错只会说 "Timeout waiting to be visible"，
+看不出是文案错还是真没渲染。先去掉整句、只留一两个不含标点的词定位到元素，再把
+`repr(locator.text_content())` 打出来逐字比对。常见的三种"看起来一样"：
+
+- **印刷体弯引号** `'`（U+2019）vs 键盘直引号 `'`（U+0027）
+- **凭印象加的前缀**（"这种提示一般都带 `Note: `"）——页面上根本没有
+- **必填星号 / 换行 / 不间断空格**混在 label 文本里（如 `'Email\n*'`）：读 label 做逐字断言时先剥掉
+  尾部星号 `re.sub(r"\s*\*\s*$", "", text.strip())`，必填性**单独**断言（两件事分开断，都不放过）
+
+有设计图时以设计图逐字核对文案，不要猜测性加字减字。
+
+## 断言强度（补充）
+
+### 期望值要取"被测系统给出的值"，不能用"你的输入"
+
+**规则**：加断言前先问一句：**这个期望值的来源是我的输入，还是被测系统告诉我的？**
+拿自己的输入当期望，等于假设"产品必须按我的写法回显"。
+
+**典型坑**：可搜索下拉 `fill("Korea")` → 点选项 → 断言选中值 `== "Korea"`。但下拉里唯一的选项是
+`South Korea`，断言无辜失败；反过来，搜 `China` 时过滤出 `China` / `Taiwan, China` / `Macao, China`
+三项，无条件点"过滤后第一项"能不能点对全凭排序运气。
+
+**做法**：
+- 点击**前**先读出将要点的那个选项文本，点击**后**回读选中值，断言两者相等
+- 挑选项三分支、显式化：① 有精确文本匹配 → 选它；② 无精确但只剩 1 项 → 选它并打印一行
+  `[INFO] 入参 X → 实际选项 Y`；③ 无精确且剩多项 → **直接失败**，报错带全部候选（搜索词有歧义）
+
+### 选完、填完都要回读
+
+**规则**：
+- 下拉"点了选项不报错但值没落上"会偶发出现：选完回读选中值，不等就关掉重开重选
+- 表单联动重渲染会把刚填的字段冲掉：关键字段 `fill` 后回读 `input_value()`，不一致重填；
+  提交前再整体核对一次
+- 负向边界用例（越界、超精度）**先回读实际值**再断言：有的输入组件不拦截，而是失焦时把值**静默改写**
+  成合法值（输入 `8.5` 得到 `9`，界面无任何提示）。只断言"提交被拦截"会把"静默改数"误判成"拦截成功"
+
+## 文本匹配与定位
+
+### `:text-is()` 和 `:has-text()` 各有一个会咬人的特性
+
+- **`:text-is()` 按元素自己的文本节点精确匹配**。文本被嵌套元素拆开时（`<span>2028-06-05 <span>(Mon)</span></span>`、
+  `<button><span class="icon"><svg/></span><span>Edit</span></button>`），对外层元素 `:text-is()` 会
+  **count=0**，加长 timeout 毫无用处。改成锚定内层：`button:has(span:text-is("Edit"))`，或
+  `div:has(> span:has-text("2028-06-05"))`。写新 selector 前先 `evaluate("e => e.outerHTML")` 看一眼有没有嵌套。
+- **`:has-text()` 是不区分大小写的子串匹配**。tab 名有前缀包含关系（外层 `Personal details`、内层 `Personal`）
+  时 `[role="tab"]:has-text("Personal")`.first 会点到外层；背后的详情弹窗里有个 `Withdraw request` 按钮时，
+  `.modal:has-text("Withdraw Request")` 会命中详情弹窗本身。**tab 一律 `[role="tab"]:text-is("…")`**；
+  确认框按**结构**认（"里面有确认按钮的那个"），并取 `.last`（最上层、最后打开的那个）。
+- `get_by_role(..., name=...)` 对"图标 + 文字"按钮的无障碍名也可能匹配失灵，CSS 能命中时以 CSS 为准。
+- Playwright 的 Locator 没有 `triple_click()`，全选输入框内容用 `click(click_count=3)`。
+
+### 列表单元格的 innerText 往往不是你以为的那个字符串
+
+**规则**：一个"名字"单元格的 `innerText` 可能是多行复合：头像首字母缩写 / 名字 / 副标题（职位、邮箱）。
+直接拿整格文本去搜索框搜**恒 0 命中**，症状看着像"这条数据消失了"。按行拆开、认清哪一行才是名字再用。
+
+## 弹窗与作用域
+
+- **弹窗 landmark 要用内容区分**：同一页面可能有多个 dialog，`[role="dialog"]` 不够，写成
+  `[role="dialog"]:has-text("Edit basic")` 或 `[role="dialog"]:has(input#firstName)`。
+- **弹窗关闭后可能还留在 DOM**（只是外层加了 `display:none`）。连续操作两个弹窗时，选择器会命中上一个
+  已关闭的残骸。按标题过滤或按可见容器定位；判可见用 `getBoundingClientRect()`，不要用 `offsetParent`
+  （`position: fixed` 的元素它恒为 null）。
+- **连续打开同类弹窗，先等上一个真正关掉**：关闭后 `dialog.wait_for(state="hidden")`，打开下一个前也
+  确认没有残留；否则会命中正在消失的那个，报 "element is not stable" → "detached" → 超时。
+- **不是所有弹窗都能用 Escape 关**：按 Esc 后 `wait_for(state="hidden")` **稳定**超时（不是偶发慢），先怀疑
+  这个弹窗禁用了键盘关闭，改点它自己的 Cancel / X，别一直加长 timeout。
+- **图标按钮（铅笔、三点）严禁全局定位**：一个详情页上往往有好几个同类图标（页头 + 各区块 + 弹窗残留），
+  全局 `.first` 会静默点错，报错却出现在下游的 `wait_for` 上（挂点和真因隔一层）。先锚定语义容器
+  （含区块标题的卡片 / 页头）再在里面找图标。
+- **逗号并列 selector 数条目会虚高**：`'.list .item, .list > div'` 这种"精确 + 兜底"的 OR 写法去 `count()`，
+  兜底那半会把容器自己的标题 div、空状态提示一起数进去。数业务条目只用精确选择器；怀疑计数不对时
+  逐条打印 `nth(i).inner_text()` 看看到底数了什么。
+- **同名文本在多个页签都有时**：操作某个页签里的行之前显式切到（或直连）那个页签，不要依赖上一步停在哪。
+
+## 点击与等待（补充）
+
+- **按钮顽固 actionability 超时**（`count`/`is_visible`/`bounding_box` 都正常，`click()` 仍稳定超时，重试和
+  延时都没用）→ 就地 `click(force=True)`，不影响测试意图。
+- **元素在视口外**（如向上弹出的确认气泡落在负坐标）时 `force=True` 也点不到——force 只跳过遮挡检查。
+  改用 `locator.dispatch_event("click")`，外面套 `expect_response(...)` 证明操作真的生效，不是静默点空。
+- 自建 `browser.new_context()` **不继承**根 conftest 里的 viewport 等设置，要显式传。
+- **SPA 内跳转是两拍渲染**：点链接进入新视图后 `networkidle` 不够——第一次读到的可能还是**上一页**的表头，
+  表头换好之后数据行还要再晚一拍。表头和数据行**分开等**：先等新页面独有的表头文案，再等第一条数据行。
+  直接 `page.goto()` 同一 URL 不会有这个问题。
+- **提交后跳回列表不能立刻读**：POST 落地和列表接口发出是两件异步事，`networkidle` 可能在列表接口发出前
+  就已经 settle。提交后等**目标新行本身可见**，等不到再 `goto()` 重新拉一次（不静默吞，仍交给断言暴露）。
+- **上传等请求结束，不等进度条**：文件项容器先出现、进度条后渲染，空档里"没有未满的进度条"会成立而提前放行。
+  `set_input_files` 前监听 `multipart/form-data` 的请求，等它 `requestfinished`。注意 Playwright 拿不到
+  multipart 请求的 body，只能按 content-type 认。
+- **Playwright 同步 API 里等事件要用 `page.wait_for_timeout()`**，`time.sleep()` 期间事件监听不会被派发。
+
+## 列表、筛选与计数
+
+- **行数类断言比分页总数，不比当前页**：列表每页固定 N 行时，"筛选前后行数不同"如果比的是当前页行数，
+  筛选完全没生效也照样绿（前后都是满页）。读分页控件里的总数文本；要逐行核对结果集就翻完所有页。
+- **一个筛选弹层里多个筛选区的选项常共处同一棵子树**：裸文本匹配挑选项，撞名就**静默**选错区。
+  按文档顺序把选项归到它前面最近的分组标题下，再按归属定位。
+- **手风琴 / 可滚动弹层里，`is_visible()` 为 True ≠ 在可视区**：选项被挤出弹层可视区时 `click(force)` 和
+  `check()` 都不改变选中状态。先点目标分组标题（收起其它组）、等动画结束，再按坐标点，**点完回读 checked**。
+- **"展开态"别靠盲点切换**：折叠区默认可能就是展开的，盲点一下反而收起。先判断（该区有没有可见选项），
+  确实收起才点；标题上不一定有 `aria-expanded`。
+
+## 测试数据（补充）
+
+### 没数据不许 skip，定位失败更不许转成 skip
+
+**规则**：`pytest.skip` 只用于**确实缺前置数据、且当前环境无法构造**（或时间态无法构造）的情况。
+- "列表第一页没找到目标状态的数据就 skip"等于没测：环境里往往有成百上千条，只是不在第一页。
+- `except Exception: pytest.skip("selector 可能需要调整")` 把**定位失败吞成了跳过**——selector 漂移本该是失败，
+  体检里却显示成"跳过"而不是"坏了"。
+
+**做法：先查现成的，没有才造**：
+- 用页面自己的列表接口**只读**查找符合条件的现成数据；写操作（造数、改状态）一律走 UI
+- 只用**自动化造的数据**（命名带前缀 + 时间戳），手工造的、别人的数据不碰
+- 只读用例可以共享同一条数据；**会改状态的用例独占**一条，不与只读用例共用
+- 拿到 id 后**直连详情页**，列表里锁行用稳定的行 id 属性（不要用"第 N 行"）
+
+### 数据驱动的占位符替换必须 fail-fast
+
+**规则**：YAML / 模板里写 `{first_name}` 这类占位符、运行时用 context 替换的，替换函数在**替换后仍残留占位符**
+时必须直接抛错，绝不能把字面值 `{first_name}` 原样填进表单。
+
+**真实发生过**：某个 helper 调填表引擎时漏传了 context，引擎对缺 key 静默放行，几十条测试数据的名字
+变成了字面值 `{first_name} ...`；更隐蔽的是，同一用例的断言也没传 context，**期望值同样是字面值，
+断言跟脏数据对上了，假通过**。helper 拆成多段时把 context 一起返回、传到底；模板里新增占位符时，
+同步补进统一的 context 构造函数。
+
+### 其它造数纪律
+
+- **测试数据累积会改变"第一页是谁"**：泛搜一个词取第一行，会被反复新建的测试数据挤掉。取数用固定的、
+  状态确定的测试对象。
+- **从造数命名里解析时间戳，正则要加数字边界**：前缀以数字结尾时（`E1` + `1787131953`），
+  无边界的 `1\d{9}` 会截错位、解析成十几年前。用 `(?<!\d)(1\d{9})(?!\d)`，宁可判不出来也不要判错。
+- **日期偏移别撞日**："基准日 + n 天，落在周末就顺延到周一"会让相邻的 n 落到同一天，前一条留下的数据挡住
+  后一条。改成"从基准日起第 n 个工作日"；探查脚本用专属的日期段，别跟用例共用。
+- **改造数逻辑前先把派生关系测出来**：某个日期字段到底由哪个输入决定，建一条看它生成什么，比"改完跑一轮猜"
+  快得多；改完要把复用这段造数逻辑的代表用例都跑一遍。
+- **批量改 N 份配置，每一份都要单独实跑复验**：一个文案改了 → 批量改 N 份数据文件时，只抽查两三份
+  会漏掉"恰好不一样"的那一份，而且漏掉的那份可能正是冒烟用例。
+
+## 登录与多角色（补充）
+
+- **同一域名下多个角色切换，切之前先清登录态**：残留的上一个角色的 cookie / localStorage 会和新注入的态混在
+  一起，"看起来已登录"的判断照样通过，实际是用错的身份访问页面（常见表现是 SPA 重定向挂起、超时落在
+  无关的地方）。先 `context.clear_cookies()` + 清 `localStorage` / `sessionStorage` 再登录或注入；
+  隔离要求更高时用独立的 browser context。
+- **"页面上有邮箱输入框 = 被踢回登录页"这个判断太粗**：业务页里本来就可能有邮箱字段。判断是否被踢回登录页
+  要看**邮箱框和密码框同时存在**，或出现无权限提示；更好的做法是**先认页面 landmark**，landmark 在就说明页面是对的。
+- **独立脚本（探针、清理工具）登录要带重试**：高频登录会遇到验证码页不出现（限流）或同一窗口撞码。包 3 次重试，
+  失败时等到下一个验证码窗口再试。
+
+## 排查"卡住不动"
+
+- **跑完了整批却不结束**：faulthandler 只能看到事件循环，Playwright 同步 API 的业务帧在另一个 greenlet 里。
+  临时挂一个插件遍历 `gc.get_objects()` 里的 greenlet，打印 `gr_frame` 栈，就能看到真正卡在哪。
+- 真实遇到过的一种：用正式版 Chrome（`--browser-channel=chrome`）跑批时，Chrome 派生的崩溃上报 / 自动更新进程
+  变成孤儿进程并继承了 driver 的 stderr，driver 要等 stderr EOF 才算关闭完成，于是 `Browser.close()` 一直卡着。
+  手动结束这些孤儿进程后 pytest 立即退出。
+
+## 邮件验证类（用到邮箱收验证码 / 邀请链接时再看）
+
+- **解码必须容错**：邮件的编码声明可能和实际字节不符，所有 `.decode()` 带 `charset or "utf-8", errors="replace"`；
+  单封邮件解析失败要跳过，绝不能中断整轮扫描（否则一封坏邮件留在收件箱里，之后每一轮取件都失败）。
+- **Subject / Body 比对前先归一化空白**：长标题有 RFC 2822 折行残留的 `\r\n `、收件网关会加 `[EXTERNAL]` 之类前缀、
+  模板源码里的按钮文案可能有字面换行。`re.sub(r"\s+", " ", text).strip()` 后再比——这不是放宽断言，
+  对"不应残留占位符"这类否定式断言反而更严格。
+- **计数按 Message-ID 去重**：共享收件箱可能把一封逻辑邮件投递成多条，只数条数会把投递层重复误判成产品重复发送。
+  判断"新增了几封"先记下操作前的邮件 id 集合再取差集；所有计数在关连接**之前**做完。
+- **IMAP 连接会被服务商中途断开**：搜索时遇到 `abort` / `OSError` 要重连并选回原文件夹重试，否则拿着死连接
+  空转到超时，看起来像"邮件没到"。
+- **有的服务商有每日拉取配额**：每轮轮询都整封拉取当天全部邮件，跑到傍晚就会把配额烧光。先批量拉收件人等邮件头
+  筛选、只对命中的拉正文，按 UID 缓存；检测到配额用尽立即报错说明原因。
+- **有的 IMAP 会话不会自动刷新邮箱快照**：搜索前先 `noop()`，否则新邮件要等重连才看得见。
+- **验证码只认"点登录之后"到的邮件**：同一账号残留的旧验证码邮件会被先取到。点登录前记下最大 UID，只认之后的；
+  填完验证码要确认真的离开了登录页，否则明确报错。
 
 ---
 
@@ -241,6 +444,50 @@ session 级 fixture 返回的 page 跨用例会失效。正解是**缓存登录�
 - **某些按钮在 headless 下点击不切换视图** → 加 hover 再 click，或退化为 URL 直达。
 - **嵌套 tab 的 active 面板会重复命中**：外层和内层的 active panel 同时匹配会触发 strict mode
   violation，用 id 后缀定位（如 `[id$="-panel-detail"]`）。
+
+### Ant Design 补充
+
+- **表格首行是隐藏的测量行**：`tbody` 首位插了一个 `tr.ant-table-measure-row`（`aria-hidden`），`tbody tr`.first
+  拿到的是它，`hover()` / `inner_text()` 卡满超时并报 `element is not visible`，极易误判成"菜单没出来"或"没数据"；
+  `:nth-child(1)` 同样选到它。数据行一律用 `tr.ant-table-row`，判"有没有数据"也数它；三点菜单触发器要 scope 在该行内。
+- **锁定某条记录的行用 `tr[data-row-key="<id>"]`**：Ant 表格行的 `data-row-key` 通常就是该记录的业务 id，跨分页扫描即可。
+- **已关闭的下拉不会从 DOM 移除**，只是加 `ant-select-dropdown-hidden`。不 scope 到当前可见的下拉，`.first` 会命中
+  其他字段残留的同名旧选项（报 not visible，不是 count=0）。统一写成
+  `.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option-content:text-is("Yes")`。
+- **下拉选项的文字在内层**：`.ant-select-item-option:text-is("Yes")` count=0（外层没有直接文本节点），要对
+  `.ant-select-item-option-content` 用 `:text-is`。`:has-text` 不受影响。
+- **同一个填表方法里，所有下拉要么都走共享 helper，要么都不走**：只有一个字段裸写选项点击时，会偶发选不中，
+  极易被误判成"环境不稳定"。
+- **读 Select 当前值只能读 `.ant-select-selection-item`**：已选值的 `input.input_value()` 恒为空。
+- **已选后要重开下拉，点外层 `.ant-select-selector` 容器**（或 `force=True`），不要点内部 search input——它被显示
+  已选值的 span 盖住。
+- **虚拟滚动下拉（rc-virtual-list）读全量选项禁止 `hover` + `mouse.wheel`**：节点滚动中持续重建，hover 稳定性检查
+  会反复重试、逐轮叠加到超时。直接 JS 改 `scrollTop`（`el.scrollTop += el.clientHeight`），每次滚动后收集当前可见项
+  取并集，直到集合不再增长。
+- **InputNumber 配了 `min/max/precision` 时不拦截越界，而是失焦时静默夹逼**（`0→1`、`25→24`、`8.5→9`）。
+  越界用例先回读再断言是"拦截"还是"夹逼到 X"。
+- **下拉 / 菜单偶发卡在展开动画首帧**（`ant-slide-up-appear-start`，opacity 0，菜单项已在 DOM 但 `is_visible()` 恒 False）：
+  等不到就**关闭再重新打开**，不要只开一次干等。
+- **Popconfirm 和普通 hover tooltip 都是 `role="tooltip"`**：同页同时出现时 `[role="tooltip"]` 撞 strict mode。
+  Popconfirm 用 `div.ant-popover-inner[role="tooltip"]` 精确定位。
+- **下拉菜单结构**：标准是 `ul.ant-dropdown-menu > li.ant-dropdown-menu-item > span.ant-dropdown-menu-title-content`，
+  禁用项带 `ant-dropdown-menu-item-disabled`（hover 它才出原因 tooltip）。但项目自定义的菜单浮层可能**直接用 span 当菜单项、
+  没有 li**——菜单项标签别猜，先 dump 一次 `innerHTML`。
+- **Transfer 穿梭框异步渲染，且空列表不渲染 `ul.ant-transfer-list-content`**：只等弹窗可见不够；而一侧为空时 `nth(1)`
+  会拿到另一侧。定位左右栏用永远渲染的 `.ant-transfer-list` 容器，再在里面找 `li.ant-transfer-list-content-item`。
+- **Upload 成功后文件卡片的 class 因版本而异**（实测过 `.ant-upload-list-item-container` 存在、`.ant-upload-list-item` 不存在），
+  别凭"标准命名"猜；判断上传完成以请求结束为准（见通用区"上传等请求结束"）。
+- **同一详情页常有多个 / 多层 Tabs 实例**：定位子 tab 前先枚举一次弄清每个实例是谁：
+  ```python
+  page.evaluate("""() => [...document.querySelectorAll('[role="tab"]')].map(e => ({
+    t: e.innerText.trim(), id: e.id, sel: e.getAttribute('aria-selected'),
+    vis: e.offsetParent !== null, panel: e.closest('.ant-tabs-tabpane')?.id }))""")
+  ```
+- **必填星号可能是 CSS 伪元素，也可能是 label 里的真文本**：`.ant-form-item-required::before` 画的星号不在 DOM 文本里，
+  `text=Reason *` 永远 0 匹配；但有的弹窗星号又是真文本节点（`'Reason\n*'`）。取决于具体实现，别把一处的结论当全站定律。
+  必填性断言 `.ant-form-item-required` 这个 class，文案断言剥掉星号后比。
+- **Tree 勾父节点会级联勾上全部子节点**："只勾父不勾子"在级联树上构造不出来，要表达"有同级其它权限、无某叶子"就勾同级其它叶子。
+- **分页总数在 `.ant-pagination-total-text`**（文案形如 `Total 1252`），行数类断言读它。
 
 ---
 

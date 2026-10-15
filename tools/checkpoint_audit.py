@@ -1,6 +1,11 @@
 # -*- coding: utf-8 -*-
 """检查点清单 · 合并 + 完整性查账（纯标准库）
 
+⚠️ 实验性工具，不在主流程里：GATE 0 的正式审核介质是 decomp.md + 评审控制台
+（`tools/qa_console.py`，见 artifacts/agents/orchestrator.md「Gate 处理」）。本工具对应的
+"粗粒度检查点清单 checkpoints.md"还没有进任何 agent 契约，新人可以忽略它。
+
+
     python3 tools/checkpoint_audit.py artifacts/<task_id> [--merge]
 
 做三件事，前两件是**机器查账**，不信任 agent 的自述：
@@ -26,7 +31,7 @@ REF_RE = re.compile(r"[①②③④⑤⑥]\s*([AFSRJI]\d+)")
 TBL_RE = re.compile(r"([①②③④⑤⑥])\s*([AFSRJI]\d+)")
 PRD_REF_RE = re.compile(r"PRD[\s§]*(\d+(?:\.\d+)*)")
 CHAP_RE = re.compile(r"第\s*(\d+)\s*章")          # 中文写法「PRD 第4章」
-NAMED_SECS = ("变更记录",)                          # 无编号章节（PRD5 末尾标题格式特殊）
+NAMED_SECS = ("变更记录",)                          # 无编号的章节标题（如文末的变更记录）
 FRAME_RE = re.compile(r"帧\s*(\d{1,2})")
 HEAD_RE = re.compile(r"^(#{2,4})\s*(\d+(?:\.\d+)*)\.?\s*(.*)")
 

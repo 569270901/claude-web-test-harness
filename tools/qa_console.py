@@ -118,7 +118,7 @@ def discover() -> dict:
             try:
                 cc = case_console.build(d.name)
                 cs = cc["cases"]
-                ok = sum(1 for c in cs if c["auto_status"] == "passed" or c["manual_status"] == "pass")
+                ok = sum(1 for c in cs if c["auto_status"] in ("passed", "xfailed") or c["manual_status"] == "pass")
                 dv = sum(1 for c in cs if c["divergent"])
                 badges.append({"k": "run", "t": f"执行 {ok}/{len(cs)}"})
                 if dv:
@@ -319,8 +319,8 @@ textarea{min-height:46px;resize:vertical}
 .cid{font-family:"IBM Plex Mono",monospace;font-size:12.5px;color:var(--ink2);flex:none}
 .ttl{flex:1;min-width:230px}
 .p-P0{color:var(--bad)}.p-P1{color:var(--warn)}.p-P2{color:var(--ink3)}
-.s-passed,.s-pass{color:var(--ok)}.s-failed,.s-fail,.s-error{color:var(--bad)}
-.s-blocked{color:var(--warn)}.s-skip,.s-skipped{color:var(--ink3)}.s-none{color:var(--ink3);opacity:.6}
+.s-passed,.s-pass,.s-xfailed{color:var(--ok)}.s-failed,.s-fail,.s-error,.s-xpassed_strict{color:var(--bad)}
+.s-blocked,.s-xpassed{color:var(--warn)}.s-skip,.s-skipped{color:var(--ink3)}.s-none{color:var(--ink3);opacity:.6}
 .gapc{color:var(--gap)}
 .bd{border-top:1px solid var(--rule);padding:14px;display:none}
 .case.open .bd{display:block}
@@ -359,7 +359,7 @@ let IDX=null,VIEW='index',TASK=null,DATA=null,F='all',OPEN={},VD={},G0I=0;
 const $=s=>document.querySelector(s);
 const esc=s=>(s||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 const md=s=>esc(s).replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>').replace(/`([^`]+)`/g,'<code>$1</code>');
-const AS={passed:'通过',failed:'失败',error:'错误',skipped:'跳过'};
+const AS={passed:'通过',failed:'失败',error:'错误',skipped:'跳过',xfailed:'已知缺陷(预期失败)',xpassed:'意外通过',xpassed_strict:'⚠️意外通过(疑似已修复,待复核)'};
 const MS={pass:'通过',fail:'失败',blocked:'阻塞',skip:'跳过'};
 const VIEWNAME={gate0:'GATE 0 评审',cases:'用例执行'};
 
@@ -567,12 +567,12 @@ async function g0clear(cid){
   delete VD[cid];draw();
 }
 /* ── 执行台 ── */
-function ok(c){return c.auto_status==='passed'||c.manual_status==='pass'}
+function ok(c){return ['passed','xfailed'].includes(c.auto_status)||c.manual_status==='pass'}
 function cpass(c){
   if(F==='all')return true;
   if(F==='undone')return !c.auto_status&&!c.manual_status;
   if(F==='div')return c.divergent;
-  if(F==='bad')return ['failed','error'].includes(c.auto_status)||c.manual_status==='fail';
+  if(F==='bad')return ['failed','error','xpassed_strict'].includes(c.auto_status)||c.manual_status==='fail';
   if(F==='gap')return c.map_gap;
   if(F==='ok')return ok(c);
   return true;
@@ -580,11 +580,12 @@ function cpass(c){
 function drawCases(){
   const cs=DATA.cases,n=f=>cs.filter(f).length;
   $('#kpi').innerHTML=
-    `<span>自动 <b class="s-passed">${n(c=>c.auto_status==='passed')}</b>/<b class="s-failed">${n(c=>['failed','error'].includes(c.auto_status))}</b>/<b>${n(c=>!c.auto_status)}</b></span>`+
+    `<span>自动 <b class="s-passed">${n(c=>c.auto_status==='passed')}</b>/<b class="s-failed">${n(c=>['failed','error'].includes(c.auto_status))}</b>/<b class="s-xfailed">${n(c=>c.auto_status==='xfailed')}</b>已知缺陷/<b>${n(c=>!c.auto_status)}</b></span>`+
     `<span>人工 <b class="s-pass">${n(c=>c.manual_status==='pass')}</b>/<b class="s-fail">${n(c=>c.manual_status==='fail')}</b>/<b>${n(c=>!c.manual_status)}</b></span>`+
-    `<span>分歧 <b class="s-blocked">${n(c=>c.divergent)}</b></span><span>已验证 <b>${n(ok)}/${cs.length}</b></span>`;
+    `<span>分歧 <b class="s-blocked">${n(c=>c.divergent)}</b></span><span>已验证 <b>${n(ok)}/${cs.length}</b></span>`+
+    (n(c=>c.auto_status==='xpassed_strict')?`<span>⚠️疑似已修复 <b class="s-xpassed_strict">${n(c=>c.auto_status==='xpassed_strict')}</b>（xfail意外通过，待复核）</span>`:'');
   $('#fil').innerHTML=[['all','全部',cs.length],['undone','未执行',n(c=>!c.auto_status&&!c.manual_status)],
-    ['div','两边分歧',n(c=>c.divergent)],['bad','有失败',n(c=>['failed','error'].includes(c.auto_status)||c.manual_status==='fail')],
+    ['div','两边分歧',n(c=>c.divergent)],['bad','有失败',n(c=>['failed','error','xpassed_strict'].includes(c.auto_status)||c.manual_status==='fail')],
     ['gap','卡地图缺口',n(c=>c.map_gap)],['ok','已验证',n(ok)]]
     .map(([k,l,v])=>`<button class="${F===k?'on':''}" onclick="setF('${k}')">${l} ${v}</button>`).join('');
   const gst=(DATA.frontmatter||{}).status||'';
@@ -626,7 +627,7 @@ function ccard(c){
   if(EDIT===c.id){h+=editForm(c);return h+'</div></div>'}
   h+=`<div style="margin-bottom:10px"><button onclick="startEdit('${c.id}')">编辑这条</button></div>`;
   h+=`<dl class="meta"><dt>前置</dt><dd>${md(c.pre)||'—'}</dd><dt>步骤</dt><dd>${md(c.steps)||'—'}</dd>`+
-     `<dt>期望</dt><dd>${md(c.expect)||'—'}</dd><dt>page_ref</dt><dd>${md(c.page_ref)||'—'}</dd>`+
+     `<dt>期望</dt><dd>${md(c.expect)||'—'}</dd><dt>依据</dt><dd>${md(c.prd_ref)||'—'}</dd><dt>page_ref</dt><dd>${md(c.page_ref)||'—'}</dd>`+
      `<dt>溯源</dt><dd class="mono" style="font-size:11.5px">${esc(c.derived_from)}　·　cases.md:${c.line_no}</dd></dl>`;
   h+='<div class="lanes"><div class="lane"><h4><span>自动化执行</span><span class="t mono">auto_runs.jsonl</span></h4>';
   if(c.map_gap)h+='<p class="hint">⚠️ 卡在 page_map 缺口上，探索补完前跑不了自动化——先走人工。</p>';

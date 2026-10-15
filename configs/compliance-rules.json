@@ -58,6 +58,70 @@
       "globs": ["tests/**/*.py", "functional/**/*.py"],
       "pattern": "ant-select-dropdown|ant-picker-dropdown",
       "reason": "测试文件内联裸写组件库下拉浮层 selector 是已付过学费的坑（旧 dropdown 关闭后 DOM 不移除、只加 hidden class → stale 假匹配 / :text-is 零匹配）；应走 page object 里已经修好的下拉 helper"
+    },
+    {
+      "name": "no_skip_on_missing_data",
+      "level": "warn",
+      "globs": ["tests/**/*.py", "functional/**/*.py"],
+      "pattern": "pytest\\.skip\\(\\s*f?['\"](测试环境中?|环境中?|当前)?(无|没有|未找到|找不到|[Nn]o\\s|[Nn]othing|[Nn]ot found)",
+      "exempt_pattern": "^\\s*#",
+      "reason": "环境里碰巧没有目标数据就 skip：报表上是「跳过」不是「失败」，覆盖悄悄消失（某次体检发现大批用例因「列表第一页没有该状态」而 skip，其实环境里数据很多）。先查现成数据、没有就走 UI 造数；确属合理的条件跳过用 rules-allow 写明理由"
+    },
+    {
+      "name": "no_exception_to_skip",
+      "level": "warn",
+      "globs": ["tests/**/*.py", "functional/**/*.py"],
+      "pattern": "pytest\\.skip\\(\\s*f[\"'][^\"']*\\{(e|exc|err|ex)\\b",
+      "exempt_pattern": "^\\s*#",
+      "reason": "try/except 把异常吞成 skip：selector 坏了也只显示「跳过」，定位失败被伪装成环境问题。让异常直接暴露（失败就是信号）"
+    },
+    {
+      "name": "tab_use_text_is",
+      "level": "warn",
+      "globs": ["tests/**/*.py", "functional/**/*.py", "pages/**/*.py", "utils/**/*.py", "page_map/**/*.yaml"],
+      "pattern": "\\[role=\\\\?[\"']tab\\\\?[\"']\\]:has-text\\(",
+      "exempt_pattern": "^\\s*#",
+      "reason": "tab 名有前缀包含关系时（如 Order / Order history），:has-text() 是子串匹配，.first 会点错 tab；用 :text-is() 精确匹配"
+    },
+    {
+      "name": "no_long_fixed_sleep",
+      "level": "warn",
+      "globs": ["tests/**/*.py", "functional/**/*.py", "pages/**/*.py", "utils/**/*.py"],
+      "pattern": "time\\.sleep\\(\\s*([5-9]|\\d{2,})(\\.\\d+)?\\s*\\)|wait_for_timeout\\(\\s*([5-9]\\d{3}|\\d{5,})\\s*\\)",
+      "exempt_pattern": "^\\s*#",
+      "reason": "≥5s 的固定等待是在赌时间（网慢时不够、网快时白等）。改为等证据：接口响应、DOM 证据、元素状态；异步元素的等待条件读 page_map 的 async / flows 动力学字段（utils/interaction.py）"
+    },
+    {
+      "name": "no_page_wide_has_text_container",
+      "level": "warn",
+      "globs": ["tests/**/*.py", "functional/**/*.py", "pages/**/*.py", "utils/**/*.py"],
+      "pattern": "['\"]div:has-text\\(",
+      "exempt_pattern": "^\\s*#",
+      "reason": "div:has-text(...) 会命中包含该文案的最外层容器（往往是整页），再在里面找按钮 / 读文本就是全页范围——点到别处的按钮、断言形同全页搜索。限定到具体容器（卡片、确认框、弹窗），或从文案往上找最近的带按钮祖先"
+    },
+    {
+      "name": "no_unscoped_confirm_button",
+      "level": "warn",
+      "globs": ["tests/**/*.py", "functional/**/*.py", "pages/**/*.py", "utils/**/*.py"],
+      "pattern": "locator\\(\\s*['\"]button:has-text\\(\\\\?\"(Yes|Confirm|OK)\\\\?\"\\)['\"]\\s*\\)\\.first",
+      "exempt_pattern": "^\\s*#",
+      "reason": "全页第一个 Yes / Confirm / OK 按钮：页面上有多个确认框或残留弹层时会点错。在确认框容器内找按钮"
+    },
+    {
+      "name": "no_hardcoded_relative_date",
+      "level": "warn",
+      "globs": ["tests/**/*.py", "functional/**/*.py", "pages/**/*.py"],
+      "pattern": "date\\.today\\(\\)\\s*\\+\\s*timedelta\\(\\s*days\\s*=\\s*\\d+\\s*\\)",
+      "exempt_pattern": "^\\s*#",
+      "reason": "写死 today+N 的业务日期会随运行日期落到周末 / 节假日（被业务规则拒绝），或与相邻用例的偏移撞同一天。用「下一个工作日」「第 n 个周一」这类归一函数"
+    },
+    {
+      "name": "no_unscoped_ant_select_option",
+      "level": "warn",
+      "globs": ["pages/**/*.py", "utils/**/*.py"],
+      "pattern": "locator\\(\\s*f?['\"]\\.ant-select-item-option",
+      "exempt_pattern": "^\\s*#",
+      "reason": "（组件库特有：Ant Design，换组件库时删或改 pattern）已关闭的下拉不会从 DOM 移除，裸 .ant-select-item-option 可能命中残留旧选项；限定到 .ant-select-dropdown:not(.ant-select-dropdown-hidden)"
     }
   ],
   "$design_notes": {
@@ -67,6 +131,14 @@
     "test_weak_assertion": "is not None 只代表「字段被赋值」，不代表「赋值正确」。早期防御。",
     "no_inline_ant_dropdown_selector": "⚠️ **组件库特有规则**——pattern 里的 class 名来自 Ant Design（本 demo 用的库）。接入自己的项目时把 pattern 换成你的组件库的浮层 class（如 el-select-dropdown / MuiPopover / v-select__content），不用组件库就整条删掉。背后的教训是通用的：浮层类组件关闭后常常不移除 DOM、只加 hidden class，于是旧浮层仍能被 selector 匹配到。",
     "no_raw_set_input_files": "同样偏组件库/框架特有：裸 set_input_files 的问题在带异步校验的上传组件上最明显。原生 input[type=file] 不走校验的项目可以删掉这条。",
-    "noqa_格式": "在行末加 `# rules-allow: <rule_name> (<原因>)` 即可豁免单行。必须含 reason，方便日后审计。"
+    "noqa_格式": "在行末加 `# rules-allow: <rule_name> (<原因>)` 即可豁免单行。必须含 reason，方便日后审计。",
+    "no_skip_on_missing_data": "pattern 只抓 skip 文案以「无 / 没有 / 未找到 / no / not found」开头的写法，是「没数据就跳过」最常见的形状；中英文按需补。",
+    "no_exception_to_skip": "抓 f-string 里插了异常变量 {e}/{exc}/{err}/{ex} 的 skip——几乎一定是 except 分支把异常吞成了 skip。",
+    "tab_use_text_is": "role=tab 的元素用 :has-text 时才报；其它元素的 :has-text 不在此规则范围。",
+    "no_long_fixed_sleep": "阈值 5s / 5000ms 是经验值：短 sleep 多为渲染缓冲，长 sleep 基本是在赌异步完成时间。",
+    "no_page_wide_has_text_container": "原为 error 级，按本配置「默认 warn」的原则降级；接入方确认误报率低后可改回 error。",
+    "no_hardcoded_relative_date": "只在业务有「工作日 / 节假日」规则的项目里有意义；纯展示型站点可删。",
+    "no_unscoped_ant_select_option": "⚠️ **组件库特有规则**（Ant Design）。tests/ 下的同类写法已由 no_inline_ant_dropdown_selector 覆盖，这条管 pages/ 与 utils/ 里的 helper 本体。",
+    "exempt_pattern_注释行": "从 lint 脚本合并来的规则都带 exempt_pattern `^\\s*#`：整行注释里提到反模式（例如文档说明）不算违规。"
   }
 }

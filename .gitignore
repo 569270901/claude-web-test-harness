@@ -25,3 +25,6 @@ prd/
 .idea/
 .vscode/
 .DS_Store
+
+# 执行台账 / 断点续跑 / 止损记录（每次跑 pytest 自动写，只留本地）
+artifacts/_runs/

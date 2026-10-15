@@ -4,7 +4,7 @@
 
 A multi-agent UI test automation framework driven by [Claude Code](https://claude.com/claude-code). Drop it into your Web project, tell it "help me test xxx", and it explores the pages, drafts a checklist, writes test cases, writes the code, and runs it — **pausing at the key checkpoints so you confirm before it moves on, instead of guessing on its own.**
 
-> The demo site is [TesterHome](https://testerhome.com) (a QA community forum). The demo flow is entirely **read-only** (browsing, searching, asserting rendered content) — no signup/login/posting is automated.
+> The demo site is [TesterHome](https://testerhome.com) (a QA community forum). The demo flow is entirely **read-only** (browsing the topic list, opening a topic, asserting rendered content) — no signup/login/posting is automated.
 
 ---
 
@@ -142,7 +142,7 @@ python -m playwright install chromium
 python -m pytest tests/ -v
 
 # 3. Open Claude Code in this project directory and just say what you want, e.g.:
-#    "Design and write a read-only test suite for the TesterHome homepage and search"
+#    "Design and write a read-only test suite for the TesterHome homepage (topic list + topic detail)"
 #    It will automatically dispatch: explore pages → draft checklist (you confirm) →
 #    generate test cases (you confirm) → write code & self-run → review
 ```
@@ -226,6 +226,24 @@ rm -rf artifacts/2026-*               # old task archives (keep artifacts/README
 
 ---
 
+## Preparing inputs: requirement docs, design mockups, or just a website
+
+The harness picks its approach from what you have (tiers A / B / C — see [`artifacts/GLOSSARY.md`](artifacts/GLOSSARY.md), Chinese). Just hand over what you've got:
+
+| You have | How to hand it over | Notes |
+|---|---|---|
+| **A requirement doc** (Markdown / md exported from an online doc tool / PDF / Word) | Give the path in chat: "the PRD is at `<path>`". The agent copies it into `artifacts/<task_id>/input/` | Markdown exported from online doc tools often inlines images as base64 (several MB). Run `python3 tools/prd_intake.py <task_id> <file>` first to split it into text + image files, or the text drowns in base64 |
+| **Design mockups** | Export one PNG per screen / dialog (**2x**, so copy text is legible verbatim) into `artifacts/<task_id>/ui_design/` | Include error / empty / hover states if they were designed. Figma: select the frame → Export PNG 2x; if your agent tool has a Figma MCP connected, it can pull frames into that folder for you |
+| **Only a website, no requirement doc** | Nothing to prepare — say "there's no requirement doc; explore `<page>` and design tests for `<feature>`" | It explores first and gathers evidence: field constraints, validation messages, which actions are available in each state. Then it decomposes from what it observed. Make sure the environment is reachable; add a login fixture (Step 2 above) if needed |
+| **A version label** (optional) | Say "this is the v1.4 requirement" | Goes into `state.md` as `version:`; the console groups tasks by it |
+
+A few conventions:
+
+- `input/` and `ui_design/` are gitignored: **requirement docs and mockups stay local and never enter the repo**.
+- With only a website, what gets recorded is how the product behaves **now**, not how it **should** behave. GATE 0 explicitly asks you which observed behaviors are actually bugs.
+- Anything beyond read-only exploration (real submits, deletes) is not triggered during exploration; it is marked "not observed" for you to decide.
+- Confirmed business conclusions are written back to `specs/` (the product knowledge base), so the next task on the same module reuses them.
+
 ## 🚀 Then just drive testing by describing what you want in plain language
 
 This is the core workflow of the whole harness — **once it's plugged in, you never write a line
@@ -275,9 +293,11 @@ What it gives you:
   a review. Every edit is keyed by case ID (not line number, which drifts), snapshots the file
   the first time you touch it, and appends to an audit log recording the previous value — so
   everything is reversible and traceable.
-- **Test results fill themselves in, by case ID.** Add `-p tools.pytest_case_ledger` to your
-  pytest run and every result is matched back to the case it belongs to (it just needs the case
-  ID in the test's docstring — no changes to your existing tests). Automated runs and manual runs
+- **Test results fill themselves in, by case ID.** The ledger plugin is registered in the root
+  `conftest.py`, so just run pytest and every result is matched back to the case it belongs to
+  (it just needs the case ID in the test's docstring — no changes to your existing tests). Known
+  bugs (`xfail`) are recorded as "known defect" rather than mixed in with new failures, and a
+  known-bug case that unexpectedly passes is flagged separately as "possibly fixed — please verify". Automated runs and manual runs
   are kept as **two separate lanes**, and when the two disagree about the same case, that row is
   **highlighted** — a case that passes by hand and fails in CI (or the reverse) is exactly where
   bugs like to hide.
@@ -291,6 +311,34 @@ What it gives you:
 
   The rules live in `configs/compliance-rules.json` — most default to warnings rather than errors
   on purpose, because a scanner that cries wolf just teaches people to suppress it.
+- **Export test cases to Excel for someone else to execute.** Internal columns (`page_ref`,
+  `derived_from`) are dropped, the source column (requirement section / mockup / observed) is kept,
+  and `exec` is translated into plain words:
+
+  ```bash
+  python3 tools/cases_export.py <task_id>                 # → artifacts/<task_id>/cases_export.xlsx
+  python3 tools/cases_export.py <task_id> --only-manual   # only the cases to run by hand
+  python3 tools/cases_export.py <task_id> --csv           # CSV (opens in Excel without mojibake)
+  ```
+
+## Long regressions: resumable batches and fail-fast
+
+Both plugins are registered in the root `conftest.py` and are **off by default**:
+
+```bash
+# Resumable batch: every result is written to disk as soon as it finishes. If the run is killed
+# or the machine sleeps, rerun the exact same command and only the unfinished cases run.
+python -m pytest tests/ --batch nightly
+python -m pytest tests/ --batch nightly --batch-fresh     # wipe this batch's record and start over
+
+# Fail-fast guard: stop the batch when the same locator fails N times, or M cases fail in a row,
+# instead of grinding on for another half hour after the environment has hit a wall
+python -m pytest tests/ --guard --guard-same=2 --guard-consecutive=4
+```
+
+- Resume rules: passed / known-defect / skipped cases are skipped next time; a case during which the machine slept is always rerun. Cases with ordering dependencies should be rerun together.
+- The guard doesn't count known defects (`xfail`); the reason it stopped is written to `artifacts/_runs/guard_last.json`.
+- The plugins are listed in `pytest_plugins` rather than `addopts` in `pytest.ini`, so `--override-ini="addopts="` while debugging doesn't silently disable them.
 
 ---
 
@@ -300,14 +348,17 @@ What it gives you:
 .claude/agents/               Definitions for the 4 roles (page explorer / checklist+test-case design / test writing / review)
 artifacts/README.md           Overview: document formats, statuses, confirmation points, hard rules, progress log
 artifacts/agents/             Detailed spec for all 5 roles (incl. the dispatcher) + decomposition.md (checklist methodology)
-tools/                        The console (see the section above): review the checklist, edit test cases, record and compare test results
+tools/                        The console (see the section above): review the checklist, edit and export test cases, record and compare test results; resume / guard plugins
+utils/                        Reusable helpers for test code: interaction (waits on async evidence from the page map's dynamics fields), soft_check (soft assertions), auth_state (per-role login-state cache)
 scripts/                      journal.py (run log), check_compliance.py (hard-rule scanner), install_hooks.sh (installs the git hook)
 configs/                      Rule config for the scanner + console settings — edit these instead of the scripts
 hooks/                        The pre-commit hook itself (installed by scripts/install_hooks.sh)
 page_map/                     Page maps (YAML describing the currently deployed page elements/selectors)
 data/                         Test data
 tests/                        Test code
-CLAUDE.md                     Project conventions (declare your own directories/commands/login here)
+artifacts/GLOSSARY.md         Glossary of internal terms (GATE, tiers, confidence markers, exec…), Chinese
+specs/                        Product knowledge base (confirmed business rules / state transitions / field constraints, one .md per module)
+CLAUDE.md                     Project conventions (declare your own directories/commands/login here); also tells the main conversation it is the dispatcher
 rule.md                       Technical pitfalls to avoid, in three sections: generic engineering lessons / component-library quirks / demo-site-only facts (delete that last one when you plug in your own site)
 ```
 
