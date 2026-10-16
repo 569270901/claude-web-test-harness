@@ -370,6 +370,53 @@ def save_verdicts(task_id: str, data: dict) -> None:
             json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+# ─────────────────────── 人读列里的代号（交付前必须为 0） ───────────────────────
+# 评审控制台会把表格行原样贴给评审人看，评审人看不懂 R02 / A01–A04 / S1 / DBT-003 这类编号。
+# 规则见 artifacts/agents/decomposition.md「会被人读到的文字」：编号只许出现在 ID 列和回指列。
+REF_COLS = set(_CFG.get("reference_cols") or
+               ["ID", "债ID", "所属表", "所属功能点", "规则回指", "涉及字段", "page_ref", "置信度", "状态"])
+# 解构债清单里的「描述」是 agent 自己对账用的速记，允许代号；「问题/背景/选项」是给人看的，不允许
+REF_COLS_DEBT = {"描述"}
+_CODE_RE = re.compile(r"(?<![A-Za-z0-9])(DBT-\d+|[A-Z]{1,2}\d{1,3}(?:\s*[–\-~]\s*[A-Z]{1,2}\d{1,3})?)(?![0-9])")
+_TABLE_REF_RE = re.compile(r"表\s*[①②③④⑤⑥⑦]|[①②③④⑤⑥⑦]\s*[-:：]\s*[A-Z]")
+
+
+def code_refs(doc: dict) -> list[dict]:
+    """找出人读列里用代号指代别的条目的地方。只认文档里真实存在的行 ID（及 DBT、表编号），
+    不会把 V15、P0、ISO 之类普通大写词误判成代号。"""
+    ids = set()
+    for sec in doc["sections"]:
+        for r in sec["rows"]:
+            rid = (r["cells"][0] if r["cells"] else "").strip().strip("*`")
+            if re.fullmatch(r"[A-Z]{1,2}\d{1,3}|DBT-\d+", rid):
+                ids.add(rid)
+    hits = []
+    for sec in doc["sections"]:
+        hdr = sec["header"] or []
+        if not hdr or not sec["rows"]:
+            continue
+        allow = REF_COLS | (REF_COLS_DEBT if "债ID" in hdr else set())
+        # 矩阵类表（如状态机 N×N 总览）没有「置信度」列，DBT 编号只能写在格子里——它是控制台把格子归到
+        # 决策卡的依据，前端显示时会自动去掉；这种表只放行 DBT，行号类代号照样要改成人话
+        dbt_ok = "置信度" not in [h.strip() for h in hdr]
+        for r in sec["rows"]:
+            rid = (r["cells"][0] if r["cells"] else "").strip()
+            for col, cell in zip(hdr, r["cells"]):
+                if col.strip() in allow or not cell.strip():
+                    continue
+                found = []
+                for m in _CODE_RE.finditer(cell):
+                    tok = m.group(1)
+                    first = re.split(r"\s*[–\-~]\s*", tok)[0]
+                    if (tok.startswith("DBT-") and not dbt_ok) or first in ids:
+                        found.append(tok)
+                found += _TABLE_REF_RE.findall(cell)
+                if found:
+                    hits.append({"table": sec["key"], "row": rid, "col": col.strip(),
+                                 "codes": found, "line": r["line_no"], "text": cell.strip()[:80]})
+    return hits
+
+
 def cmd_parse(task_id: str) -> None:
     p = paths(task_id)
     doc = parse_md(p["decomp"])
@@ -382,6 +429,12 @@ def cmd_parse(task_id: str) -> None:
     from collections import Counter
     c = Counter(i["kind"] for i in items)
     print(f"\n决策项 {len(items)} 个： " + " / ".join(f"{k}={v}" for k, v in c.items()))
+    refs = code_refs(doc)
+    print(f"\n人读列里的代号：{len(refs)} 处" + ("（交付前必须为 0，写法见 decomposition.md「会被人读到的文字」）" if refs else "  ✓"))
+    for h in refs[:40]:
+        print(f"  L{h['line']:<4} {h['table']} {h['row']:<6} 「{h['col']}」 {', '.join(h['codes'])}  ← {h['text']}")
+    if len(refs) > 40:
+        print(f"  …… 另有 {len(refs) - 40} 处")
     print("\n前 6 个样本：")
     for it in items[:6]:
         print(f"\n  [{it['uid']}] kind={it['kind']}  DBT={it['dbt']}")

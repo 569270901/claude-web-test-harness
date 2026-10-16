@@ -27,10 +27,10 @@ from gate_review import (parse_md, extract_decisions, paths, load_verdicts,  # n
 
 EXCLUDE_TABLES = {"解构债清单", "已识别的依赖", "变更对照总表", "输入档位判定"}
 KIND_META = {
-    "conflict": ("⚠️冲突", "需求文档与实测记录互相矛盾，必须你裁决"),
-    "verify":   ("⚠️待核实", "需求文档说的现值与实测记录不符，你看一眼就能答"),
-    "infer":    ("🔶推断", "agent 靠类比填的，认同就放行、不对就改"),
-    "missing":  ("⚠️缺失", "无人知道，你知道就填、不知道就留给实测"),
+    "conflict": ("⚠️冲突", "需求里两处说法互相矛盾（或需求与设计图 / 实测不一致），需要你定以哪个为准"),
+    "verify":   ("⚠️待核实", "需求写的和实际看到的不一样，你看一眼就能答"),
+    "infer":    ("🔶推断", "需求没明说，agent 参照同类功能先填了一个答案，认同就选、不对就改"),
+    "missing":  ("⚠️缺失", "需求没提、agent 也推不出来，你知道就答，不知道就留给提测实测"),
 }
 
 # ── 需求文档交叉引用的可配置形状（configs/gate_review.json，整块可缺省）──
@@ -149,6 +149,219 @@ def prd_rule_block(task_id: str) -> dict | None:
     return None
 
 
+# ─────────────────────── 通用原文定位（任何 markdown 需求文档都适用） ───────────────────────
+#
+# 为什么需要：上面的 prd_index 只认一种特定形状的需求文档（「1. 位置」+「旧 → 新」变更行），
+# 换一份普通 PRD 就一块也匹配不上，卡片证据区只剩「置信度」那一格 —— 评审人看不到原文，
+# 只能凭 agent 的转述做裁决（实锤：GATE 0 冲突卡上只显示了 "⚠️冲突 DBT-0xx" 这一格）。
+# 这里改成按「来源引用」直接定位：
+#   PRD §2.2 / §2.2        → 需求文档里编号为 2.2 的那一节正文
+#   变更日志 2026-09-28    → 需求文档里日期为该天的那一行（认 2026-09-28 / 2026年9月28日 两种写法）
+#   设计图 img_04 / img_04 → ui_design/ 下的那张图（前端显示缩略图）
+# 引用格式由 decomposition.md 的「来源」列约定；写不成这几种格式的引用就不显示，不猜。
+
+SEC_REF_RE = re.compile(r"§\s*(\d+(?:\.\d+)*)")
+DATE_REF_RE = re.compile(r"(20\d\d)\s*[-年./]\s*(\d{1,2})\s*[-月./]\s*(\d{1,2})\s*日?")
+IMG_REF_RE = re.compile(r"\b(img_\d+)(?:\.(?:png|jpe?g|webp|gif))?\b", re.I)
+HEAD_NUM_RE = re.compile(r"^(#{1,6})\s*(\d+(?:\.\d+)*)[.、\s]*(.*)$")
+MD_IMG_RE = re.compile(r"!\[[^\]]*\]\(([^)]+)\)")
+IMG_EXT = (".png", ".jpg", ".jpeg", ".webp", ".gif")
+
+
+def _norm_date(y, m, d) -> str:
+    return f"{int(y):04d}-{int(m):02d}-{int(d):02d}"
+
+
+def _img_name(path: str) -> str:
+    return Path(path).stem
+
+
+def prd_outline(task_id: str) -> dict:
+    """把需求文档切成 {sections: {编号: {...}}, dated: {日期: [行...]}}，供按引用定位。"""
+    f = find_prd(task_id)
+    if not f:
+        return {"sections": {}, "dated": {}}
+    lines = f.read_text(encoding="utf-8").splitlines()
+    sections, dated = {}, defaultdict(list)
+    heads = [(i, HEAD_NUM_RE.match(l.strip())) for i, l in enumerate(lines)]
+    heads = [(i, m) for i, m in heads if m]
+    for k, (i, m) in enumerate(heads):
+        level, num, title = len(m.group(1)), m.group(2), m.group(3).strip()
+        end = len(lines)
+        for j, m2 in heads[k + 1:]:
+            if len(m2.group(1)) <= level or not m2.group(2).startswith(num + "."):
+                end = j
+                break
+        body = lines[i + 1:end]
+        imgs = [_img_name(x) for l in body for x in MD_IMG_RE.findall(l)]
+        text = "\n".join(MD_IMG_RE.sub(lambda mm: f"[图 {_img_name(mm.group(1))}]", l).rstrip()
+                         for l in body).strip()
+        sections.setdefault(num, {"num": num, "title": title, "line": i + 1,
+                                  "text": re.sub(r"\n{3,}", "\n\n", text)[:900], "images": imgs})
+    for i, l in enumerate(lines):
+        t = l.strip()
+        if not t.startswith("|"):
+            continue
+        cells = [c.strip() for c in t.strip("|").split("|")]
+        m = DATE_REF_RE.search(cells[0] if cells else "")
+        if not m:
+            continue
+        imgs = [_img_name(x) for x in MD_IMG_RE.findall(t)]
+        text = " ｜ ".join(MD_IMG_RE.sub(lambda mm: f"[图 {_img_name(mm.group(1))}]", c)
+                           .replace("<br>", " ") for c in cells[1:] if c)
+        dated[_norm_date(*m.groups())].append({"line": i + 1, "date_raw": cells[0],
+                                               "text": text[:600], "images": imgs})
+    return {"sections": sections, "dated": dict(dated)}
+
+
+def resolve_sources(task_id: str, texts: list[str], outline: dict) -> list[dict]:
+    """从卡片相关文本里抽出来源引用，逐个定位到原文 / 图片。只返回真的找到了的。"""
+    joined = "\n".join(t for t in texts if t)
+    out, seen = [], set()
+    ui = paths(task_id)["dir"] / "ui_design"
+    for m in SEC_REF_RE.finditer(joined):
+        num = m.group(1)
+        sec = outline["sections"].get(num)
+        if sec and ("sec", num) not in seen:
+            seen.add(("sec", num))
+            out.append({"type": "text", "ref": f"需求文档 §{num} {sec['title']}".strip(),
+                        "line": sec["line"], "text": sec["text"], "images": sec["images"]})
+    for m in DATE_REF_RE.finditer(joined):
+        day = _norm_date(*m.groups())
+        rows = outline["dated"].get(day)
+        if not rows:   # 需求文档里日期笔误（如年份写错）时，按月日兜底找唯一一行
+            md_ = day[5:]
+            cand = [r for d, rs in outline["dated"].items() if d[5:] == md_ for r in rs]
+            rows = cand if len(cand) == 1 else None
+        if rows and ("date", day) not in seen:
+            seen.add(("date", day))
+            for r in rows:
+                out.append({"type": "text", "ref": f"变更日志 {r['date_raw']}", "line": r["line"],
+                            "text": r["text"], "images": r["images"]})
+    for m in IMG_REF_RE.finditer(joined):
+        name = m.group(1).lower()
+        if ("img", name) in seen:
+            continue
+        f = next((ui / (name + ext) for ext in IMG_EXT if (ui / (name + ext)).exists()), None)
+        if f:
+            seen.add(("img", name))
+            out.append({"type": "image", "ref": f"设计图 {name}", "file": f.name})
+    # 原文段落里自带的图片，作为该段的附图，不重复单独成块
+    shown = {s["ref"].split()[-1] for s in out if s["type"] == "image"}
+    for s in out:
+        if s["type"] == "text":
+            s["images"] = [x for x in s.get("images", []) if x not in shown and
+                           any((ui / (x + ext)).exists() for ext in IMG_EXT)]
+            s["image_files"] = [next(x + ext for ext in IMG_EXT if (ui / (x + ext)).exists())
+                                for x in s["images"]]
+    return out
+
+
+def _clean(v) -> str:
+    v = (v or "").strip()
+    return "" if v in ("—", "-") else v
+
+
+DEFAULT_MARK_RE = re.compile(r"[（(［\[]\s*默认\s*[)）］\]]")
+
+
+def agent_options(raw: str) -> list[dict]:
+    """解析解构债清单「选项」列（agent 写给评审人的具体答案，用「；」分隔，默认假设标「（默认）」）。
+
+    agent 是唯一真正懂这个问题的人，它写的选项优先于任何按问句关键词猜出来的选项。
+    「留给提测」「我来说明」两个兜底选项由这里统一补齐，agent 不必每条都写。
+    """
+    raw = (raw or "").strip()
+    if not raw or raw in ("—", "-"):
+        return []
+    parts = [x.strip() for x in re.split(r"[；;]\s*|<br\s*/?>", raw) if x.strip()]
+    parts = [re.sub(r"^\s*(\d+[.、)]|[①②③④⑤⑥⑦⑧⑨]|[A-H][.、)：:])\s*", "", x) for x in parts]
+    opts = []
+    for i, x in enumerate(parts, 1):
+        dflt = bool(DEFAULT_MARK_RE.search(x))
+        label = DEFAULT_MARK_RE.sub("", x).strip()
+        if label:
+            opts.append({"id": f"opt:{i}", "label": label, "hint": "", "default": dflt})
+    if not opts:
+        return []
+    labels = " ".join(o["label"] for o in opts)
+    if not any(k in labels for k in ("我说明", "我来填", "都不对", "我给正确值")):
+        opts.append({"id": "answer", "label": "都不对 / 情况更复杂，我来说明", "hint": "→ 在下面填，来源记「用户」"})
+    if not any(k in labels for k in ("提测", "不确定")):
+        opts.append({"id": "untested", "label": "我不确定，留给提测实测", "hint": "保持 ⚠️，不猜"})
+    return opts
+
+
+# ─────────────────────── 证据区去内部代号 ───────────────────────
+# 实锤：证据区每行挂着 "·④:R03"、格子里写着 "［需判断］ DBT-002"、"R02 的必填规则……"，
+# 评审人看不懂这些编号。这里把它们翻成人话：行号 → "业务规则表 · 第 3 条"，
+# 审阅标签 → "（需要你判断）"，正文里提到的其他编号 → 附上它指的是哪一条（前端悬停 + 对照表）。
+TABLE_NAMES = {"①": "功能点清单", "②": "字段规格表", "③": "状态流转表", "④": "业务规则表",
+               "⑤": "操作流程", "⑥": "影响范围", "⑦": "控件规格表"}
+ROW_ID_RE = re.compile(r"(?<![A-Za-z0-9])([A-Z]{1,2}\d{2,3})(?![0-9])")
+
+
+def _row_label(uid: str) -> str:
+    """'④:R03' → '业务规则表 · 第 3 条'。认不出的原样返回。"""
+    key, _, rid = uid.partition(":")
+    name = TABLE_NAMES.get(key.strip())
+    m = re.search(r"(\d+)$", rid.strip())
+    if not name:
+        return uid
+    return f"{name} · 第 {int(m.group(1))} 条" if m else f"{name} · {rid.strip()}"
+
+
+def humanize(v: str) -> str:
+    """去掉给 agent 看的审阅标记：［需判断］→（需要你判断），DBT-xxx 编号删掉。"""
+    v = re.sub(r"[［\[]\s*需判断[^］\]]*[］\]]", "（需要你判断）", v or "")
+    v = re.sub(r"[［\[]\s*可提测[^］\]]*[］\]]", "（提测后可确认）", v)
+    v = re.sub(r"\s*\bDBT-\d+\b", "", v)
+    return re.sub(r"[ \t]{2,}", " ", v).strip()
+
+
+def row_index(doc: dict) -> dict:
+    """全部核心表的 {行ID: {label: "业务规则表 · 第 2 条", gist: "<这一行在说什么>"}}。
+
+    只是**兜底**：契约要求人读列不用代号（decomposition.md「会被人读到的文字」，parse 自检必须为 0）。
+    万一漏网，前端用 gist 就地替换代号，评审人看到的是内容而不是编号。"""
+    out = {}
+    for sec in doc["sections"]:
+        name = TABLE_NAMES.get(sec["key"])
+        if not name or not sec["header"]:
+            continue
+        for r in sec["rows"]:
+            rid = (r["cells"][0] if r["cells"] else "").strip().strip("*`")
+            if not ROW_ID_RE.fullmatch(rid) or rid in out:
+                continue
+            cells = dict(zip(sec["header"], r["cells"]))
+            cond, res = (cells.get("条件") or "").strip(), (cells.get("结果/约束") or "").strip()
+            # 规则类条目只给「条件」看不出规则是什么，要把条件和结果连起来
+            gist = (f"{cond} → {res}" if cond and res else
+                    _row_gist(cells) or " ｜ ".join(r["cells"][1:3]))
+            gist = humanize(_MARKER_STRIP_RE.sub("", gist))
+            out[rid] = {"label": _row_label(sec["key"] + ":" + rid), "gist": gist[:140]}
+    return out
+
+
+def _content_evidence(rows: list[dict]) -> list[dict]:
+    """每条被引用的表行，取一列真正讲内容的格子当证据（而不是只给带 ⚠️ 的元数据格）。"""
+    out = []
+    for r in rows:
+        cells = r.get("cells", {})
+        n = 0
+        for col in CONTENT_COLS:           # 最多取两列：规则表要「条件」+「结果/约束」才说得清
+            v = (cells.get(col) or "").strip()
+            if v and v not in ("—", "-"):
+                out.append({"row": r["uid"], "col": col, "val": v})
+                n += 1
+                if n == 2:
+                    break
+        src = (cells.get("来源") or "").strip()
+        if src and src not in ("—", "-"):
+            out.append({"row": r["uid"], "col": "来源", "val": src})
+    return out
+
+
 DEBT_TABLE = "解构债清单"
 
 
@@ -178,6 +391,11 @@ def options_from_question(q: str, kind: str) -> list[dict]:
 
     # ① 「X（图）vs Y（需求文档）」—— 字面值冲突，双方是设计图与需求文档
     m = SRC_PAIR_RE.search(plain)
+    if kind == "conflict" and not m:
+        # 实锤 bug：冲突卡的问句里常带「是否」，下面的「是否 → 是/不是」分支会把冲突卡专用的
+        # 「以需求为准 / 以另一方为准」覆盖掉，评审人面对一个"二选一的冲突"只能选"是/不是"。
+        # 冲突卡永远不走关键词猜选项，回到 build_options 的冲突模板（或 agent 写的选项）。
+        return []
     if m:
         fig, prd = m.group(1).strip(), m.group(3).strip()
         return [{"id": f"is:{fig}", "label": f"按设计图：{fig}", "hint": "需求文档记为勘误"},
@@ -258,6 +476,8 @@ def build_cards(task_id: str) -> dict:
     blocks = prd_index(task_id)
     prd_file = find_prd(task_id)
     rule_blk = prd_rule_block(task_id)
+    outline = prd_outline(task_id)
+    rindex = row_index(doc)
     items = [i for i in extract_decisions(doc) if i["table"] not in EXCLUDE_TABLES]
     # 分组单位是「解构债」而不是「表行」：一行常同时提多个债（实锤见过一行提 7 个），
     # 只取 dbt[0] 会让其余债静默消失（有两条债从未进过队列）。
@@ -275,10 +495,13 @@ def build_cards(task_id: str) -> dict:
     for key, rows in groups.items():
         if not rows:                       # 债清单里有、表行没引用 → 用债描述单独成卡
             d = debts.get(key, {})
-            q = d.get("描述", "").strip() or "（该债缺描述）"
-            kd = "missing" if MARK_MISS in q or not q else "infer"
-            derived = options_from_question(q, kd)
+            desc = d.get("描述", "").strip()
+            q = _clean(d.get("问题")) or desc or "（该债缺描述）"
+            kd = "missing" if MARK_MISS in desc or not desc else "infer"
+            derived = agent_options(d.get("选项", "")) or options_from_question(q, kd)
             cards.append({"cid": key, "dbt": key, "question": q,
+                          "background": _clean(d.get("背景")),
+                          "sources": resolve_sources(task_id, [q, desc, _clean(d.get("背景"))], outline),
                           "_judge": " ".join([q, " ".join(d.values())]),
                           "prd": (match_prd([q], blocks) or ([rule_blk] if rule_blk else [])),
                           "debt_rows": d.get("所属表", ""), "debt_status": d.get("状态", ""),
@@ -308,7 +531,7 @@ def build_cards(task_id: str) -> dict:
                 opts.insert(0, {"id": "answer", "label": "我逐行填正确值（在下面填）",
                                 "hint": "→ 来源记「用户」，未填的行保持 ⚠️"})
         debt = debts.get(key, {})
-        question = debt.get("描述", "").strip()
+        question = _clean(debt.get("问题")) or debt.get("描述", "").strip()
         if not question:
             # 无债描述（solo 卡）→ 优先取行内真正的内容列，矩阵表退化成「行×列头：值」
             # （见 _row_gist 注释里的两次实锤），绝不能退化成「置信度」原始值
@@ -317,7 +540,19 @@ def build_cards(task_id: str) -> dict:
                 question = max((e["val"] for e in evid), key=len, default="（该行缺少可读描述）")
         # 债描述能解析出单一问题 → 用它的具体候选值（哪怕覆盖多行，也只是一个答案）；
         # 解析不出来才退化成「逐行填值」。
-        derived = options_from_question(question, head["kind"])
+        derived = agent_options(debt.get("选项", "")) or options_from_question(question, head["kind"])
+        srcs = resolve_sources(task_id, [question, _clean(debt.get("背景")), debt.get("描述", "")] +
+                               [" ".join(r["cells"].values()) for r in rows], outline)
+        if not derived and head["kind"] == "conflict":
+            # agent 没写选项时，冲突双方若都在原文里定位到了，就用双方原文当选项，
+            # 比"以需求文档为准 / 以另一方为准"这种抽象模板具体得多
+            texts = [x for x in srcs if x["type"] == "text"]
+            if len(texts) >= 2:
+                derived = [{"id": f"side:{i}", "label": f"以「{x['ref']}」为准",
+                            "hint": re.sub(r"\s+", " ", x["text"])[:70] + "…", "default": False}
+                           for i, x in enumerate(texts[:3], 1)] + \
+                          [{"id": "answer", "label": "都不对 / 情况更复杂，我来说明", "hint": "→ 在下面填"},
+                           {"id": "untested", "label": "我不确定，留给提测实测", "hint": ""}]
         if derived:
             opts = derived
         # 实锤修复：agent 常把［需判断］/［可提测］标签写在债清单的「状态」列
@@ -331,6 +566,9 @@ def build_cards(task_id: str) -> dict:
             "cid": key,
             "dbt": key if key.startswith("DBT") else None,
             "question": question,
+            "background": _clean(debt.get("背景")),
+            # 原文定位：问题 / 背景 / 债描述 / 被引用行的全部格子（来源列里的 §2.2、日期、img_04 都在这）
+            "sources": srcs,
             "_judge": judge_text,
             "prd": (match_prd([question] + [e["val"] for e in evid], blocks)
                     or ([rule_blk] if rule_blk else [])),
@@ -342,7 +580,7 @@ def build_cards(task_id: str) -> dict:
             "rows": [{"uid": r["uid"], "table": r["table"], "row_id": r["row_id"],
                       "cells": r["cells"], "line_no": r["line_no"]} for r in rows],
             "row_count": len(rows),
-            "evidence": evid,
+            "evidence": _content_evidence(rows) + evid,
             "options": opts,
             "per_row": (not derived) and len(rows) > 1
                        and head["kind"] in ("verify", "missing"),
@@ -354,6 +592,19 @@ def build_cards(task_id: str) -> dict:
     deferred = [c for c in all_cards if c not in cards]
     for c in all_cards:
         c.pop("_judge", None)                # 内部判断用，不进前端 payload
+    # 证据去内部代号 + 收集卡片正文里提到的其他条目编号（前端悬停解释 + 底部对照表）
+    for c in all_cards:
+        own = {e["row"].partition(":")[2] for e in c.get("evidence", [])}
+        for e in c.get("evidence", []):
+            e["row_label"] = _row_label(e["row"])
+            e["val"] = humanize(e["val"])
+        texts = [c.get("question", ""), c.get("background", "")] + [e["val"] for e in c.get("evidence", [])]
+        ids = []
+        for t in texts:
+            for rid in ROW_ID_RE.findall(t or ""):
+                if rid in rindex and rid not in ids and rid not in own:
+                    ids.append(rid)
+        c["refs"] = {rid: rindex[rid] for rid in ids}
     order = {"conflict": 0, "verify": 1, "infer": 2, "missing": 3}
     cards.sort(key=lambda c: (order.get(c["kind"], 9), -c.get("row_count", 0), c["cid"]))
     deferred.sort(key=lambda c: (order.get(c["kind"], 9), c["cid"]))

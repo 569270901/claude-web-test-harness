@@ -160,7 +160,8 @@ created_at: 2026-06-22T10:30:00Z
      `gate0_verdicts.json` / `gate0_verdicts.md`，并把 `decomp.md status` 改成 `gate0_answered`
      （表格内容不动——谁的产物谁改）。看到 `gate0_answered`：
      1. 派 test-case-design **增补轮**：读 `gate0_verdicts.json`，把每条裁决回填进 decomp.md
-        对应 cell（来源写 `用户`，置信度 `✅确定`），回填完 `status` 改回 `pending_review`
+        对应 cell（来源写 `用户`，置信度 `✅确定`）；**用户写的补充值和备注同样要体现**（例外、适用范围、
+        附加条件落进对应 cell 或新增行），回填完 `status` 改回 `pending_review`
      2. 回到本节第 2 步，摘要里说明"已回填 N 条裁决，剩余［需判断］M 条"；M=0 时用户通常
         扫一眼就能回复"确认"
      3. 增补轮占用 test-case-design 的第 2 次调用（阶段1 → 增补轮 → 阶段2，正好在 3 次上限内）

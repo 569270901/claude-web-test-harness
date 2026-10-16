@@ -185,6 +185,16 @@ class Handler(BaseHTTPRequestHandler):
             m = re.match(r"^/api/verdicts/(.+)$", p)
             if m:
                 return self._json(load_verdicts(m.group(1)))
+            # 设计图缩略图（决策卡「需求原文」区引用 img_NN 时用）。只放行 ui_design/ 下的图片，
+            # 文件名只认 [\w.-]，防止 ../ 跳出任务目录
+            m = re.match(r"^/asset/([^/]+)/ui_design/([\w.\-]+)$", p)
+            if m:
+                f = paths(m.group(1))["dir"] / "ui_design" / m.group(2)
+                ctype = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+                         ".webp": "image/webp", ".gif": "image/gif"}.get(f.suffix.lower())
+                if ctype and f.is_file():
+                    return self._send(200, f.read_bytes(), ctype)
+                return self._json({"error": "not found"}, 404)
         except FileNotFoundError as e:
             return self._json({"error": f"文件不存在: {e}"}, 404)
         except Exception as e:
@@ -273,7 +283,22 @@ color:var(--ink);border-radius:5px;padding:4px 9px}
 button:hover,select:hover{border-color:var(--ink3)}
 button.on{background:var(--ink);color:var(--bg);border-color:var(--ink)}
 .sep{color:var(--ink3)}
-.kpi{display:flex;gap:14px;flex-wrap:wrap;margin-left:auto;font-size:12px}
+.kpi{display:flex;gap:14px;flex-wrap:wrap;margin-left:auto;font-size:12px;align-items:center}
+.helpbtn{font-size:12px;padding:4px 10px}
+.vlab{font-size:12px;color:var(--ink2);margin:4px 0 6px}
+textarea.ans{min-height:64px}
+.mask{position:fixed;inset:0;background:rgba(20,20,20,.45);display:none;align-items:flex-start;justify-content:center;z-index:50;padding:48px 16px;overflow:auto}
+.mask.on{display:flex}
+.dlg{background:var(--surf);border-radius:10px;max-width:720px;width:100%;padding:24px 28px;box-shadow:0 12px 40px rgba(0,0,0,.25);line-height:1.7;font-size:14px}
+.dlg h3{margin:0 0 6px;font-size:18px}
+.dlg h4{margin:18px 0 6px;font-size:15px}
+.dlg .lead{color:var(--ink2);margin:0 0 12px}
+.dlg table{width:100%;border-collapse:collapse;font-size:13px;margin:6px 0}
+.dlg td,.dlg th{border:1px solid var(--rule);padding:8px 10px;vertical-align:top;text-align:left}
+.dlg th{background:var(--surf2);font-weight:600;white-space:nowrap}
+.dlg td:first-child{white-space:nowrap;font-weight:600}
+.dlg ol{padding-left:20px;margin:6px 0}
+.dlg .x{float:right}
 .kpi b{font-variant-numeric:tabular-nums}
 .fil{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
 main{max-width:1240px;margin:0 auto;padding:18px 20px 60px}
@@ -298,11 +323,27 @@ display:flex;align-items:center;gap:11px;flex-wrap:wrap}
 .prdb.lk{box-shadow:inset 0 0 0 1px var(--gate)}
 .prdh{display:flex;gap:10px;font-size:11px;color:var(--ink3);margin-bottom:3px}
 .prdl{font-size:12px;color:var(--ink2);margin-bottom:4px}
+.bgd{font-size:14px;line-height:1.7;color:var(--ink);background:var(--surf2);border-radius:6px;padding:10px 14px;margin:0 0 14px}
+.srcs{display:grid;gap:10px;margin-bottom:14px}
+.srcs.vs{grid-template-columns:repeat(auto-fit,minmax(260px,1fr))}
+.src{border:1px solid var(--rule);border-radius:6px;padding:10px 12px;background:var(--bg)}
+.src .sh{display:flex;justify-content:space-between;gap:8px;font-size:12px;color:var(--ink3);margin-bottom:6px}
+.src .sh b{color:var(--ink);font-weight:600}
+.src pre{white-space:pre-wrap;word-break:break-word;margin:0;font:13px/1.65 inherit;color:var(--ink)}
+.thumbs{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+.thumbs a{display:block;border:1px solid var(--rule);border-radius:4px;overflow:hidden;background:var(--surf)}
+.thumbs img{display:block;max-width:220px;max-height:150px;object-fit:contain}
+.thumbs span{display:block;font-size:11px;color:var(--ink3);padding:2px 6px}
+.opt em.dflt{display:inline-block;width:auto;margin:0 0 0 8px;vertical-align:1px;font-size:11px;padding:1px 6px;border-radius:3px;
+background:color-mix(in srgb,var(--gate) 16%,transparent);color:var(--ink2);font-style:normal}
 .prdr{margin:0;font-family:"IBM Plex Mono",monospace;font-size:13px;white-space:pre-wrap;word-break:break-word}
 details summary{cursor:pointer;color:var(--ink3);font-size:12px;padding:4px 0}
 .ev{background:var(--surf2);border-radius:6px;padding:12px 14px;margin:8px 0}
 .ev div{margin-bottom:7px;font-size:13px;word-break:break-word}
 .ev b{color:var(--ink3);font-weight:500;font-size:11px}
+.evg+.evg{border-top:1px dashed var(--rule);padding-top:9px;margin-top:4px}
+.evh{font-size:12px;font-weight:600;color:var(--ink2);margin-bottom:6px}
+.ref{background:color-mix(in srgb,var(--gate) 10%,transparent);border-radius:3px;padding:0 2px}
 .opts{display:flex;flex-direction:column;gap:8px;margin:14px 0}
 .opt{display:flex;gap:10px;text-align:left;padding:11px 14px;width:100%;align-items:flex-start}
 .opt.sel{border-color:var(--ok);box-shadow:inset 0 0 0 1px var(--ok)}
@@ -438,7 +479,7 @@ function drawGate0(){
   // 只统计「当前队列」里已答的——历史裁决可能有条目现在被自动搁置了，
   // 用全局 VD 条数当分子会出现「已答 21/9」这种反直觉的数字
   const ans=cs.filter(c=>VD[c.cid]).length;
-  $('#kpi').innerHTML=`<span>已答 <b>${ans}/${cs.length}</b></span>`+
+  $('#kpi').innerHTML=`<button class="helpbtn" onclick="showHelp()">ⓘ 这些卡是什么？</button><span>已答 <b>${ans}/${cs.length}</b></span>`+
     (DATA.deferred&&DATA.deferred.length?`<span class="t" style="color:var(--ink3)">（另有 ${DATA.deferred.length} 项已自动搁置）</span>`:'');
   const cnt={};cs.forEach(c=>cnt[c.kind]=(cnt[c.kind]||0)+1);
   $('#fil').innerHTML=['all','conflict','verify','infer','missing'].map(f=>{
@@ -454,26 +495,48 @@ function drawGate0(){
     (b.loc?`<div class="prdl">${esc(b.loc)}</div>`:'')+`<pre class="prdr">${esc(b.raw)}</pre></div>`;
   const pl=(c.prd||[]).filter(b=>b.likely),po=(c.prd||[]).filter(b=>!b.likely);
   let h=`<div class="card"><div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:6px">`+
-    `<span class="pill k-gate">${c.kind_label}</span>`+(c.dbt?`<span class="mono" style="font-size:12px;color:var(--ink3)">${c.dbt}</span>`:'')+
+    // 卡片编号（DBT-xxx）对评审人没有意义，不显示；悬停在类型标签上可看，方便跟 agent 对话时引用
+    `<span class="pill k-gate"${c.dbt?` title="编号 ${c.dbt}"`:''}>${c.kind_label}</span>`+
     (c.row_count>1?`<span class="pill k-warn">1 个答案决定 ${c.row_count} 行</span>`:'')+
     (VD[c.cid]?'<span class="pill k-ok">已答（已存盘）</span>':'')+
-    (SAVED===c.cid?'<span class="pill k-run">✓ 刚存盘</span>':'')+'</div>';
-  h+=`<p class="q">${md(c.question)}</p><p class="hint">${c.kind_hint}　·　这个答案会更新 ${c.row_count} 处解构表内容</p>`;
+    '<span id="svtag"></span>'+'</div>';
+  h+=`<p class="q">${md(c.question)}</p>`+(c.background?`<p class="bgd">${md(c.background)}</p>`:'')+
+     `<p class="hint">${c.kind_hint}　·　这个答案会更新 ${c.row_count} 处解构表内容</p>`;
+  const S=c.sources||[],T=S.filter(x=>x.type==='text'),I=S.filter(x=>x.type==='image');
+  const th=(f,cap)=>`<a href="/asset/${encodeURIComponent(TASK)}/ui_design/${encodeURIComponent(f)}" target="_blank" title="点击看大图">`+
+     `<img src="/asset/${encodeURIComponent(TASK)}/ui_design/${encodeURIComponent(f)}" loading="lazy"><span>${esc(cap)}</span></a>`;
+  if(T.length||I.length){
+    h+=`<div class="prdt">需求原文${c.kind==='conflict'&&T.length>=2?'（冲突双方并排）':''}</div>`;
+    h+=`<div class="srcs${c.kind==='conflict'&&T.length>=2?' vs':''}">`+T.map(x=>
+       `<div class="src"><div class="sh"><b>${esc(x.ref)}</b><span class="mono">第 ${x.line} 行</span></div><pre>${esc(x.text)}</pre>`+
+       ((x.image_files||[]).length?`<div class="thumbs">${x.image_files.map(f=>th(f,f)).join('')}</div>`:'')+'</div>').join('')+'</div>';
+    if(I.length)h+=`<div class="thumbs" style="margin:-4px 0 14px">${I.map(x=>th(x.file,x.ref)).join('')}</div>`;
+  }
   if(c.prd&&c.prd.length){h+='<div class="prd"><div class="prdt">需求文档原文</div>'+(pl.length?pl.map(blk).join(''):blk(c.prd[0]));
     const rest=pl.length?po:c.prd.slice(1);
     if(rest.length)h+=`<details><summary>另有 ${rest.length} 处也提到这个字符串</summary>${rest.map(blk).join('')}</details>`;
     h+='</div>'}
-  h+=`<details><summary>查看解构表原始行与证据（${c.evidence.length} 条）</summary><div class="ev">`+
-     c.evidence.map(e=>`<div><b>${esc(e.col)}</b>　${md(e.val)}<span class="t mono"> ·${e.row}</span></div>`).join('')+'</div></details>';
+  // 证据按条目分组、标题用人话（"业务规则表 · 第 3 条"）。
+  // 兜底：契约要求人读列不用代号，万一漏网，把「R02 / ④-R02」就地替换成它指的那条内容，评审人不看编号
+  const REFS=c.refs||{};
+  const refx=html=>html.replace(/(^|>)([^<]+)/g,(m,a,t)=>a+t.replace(/([①②③④⑤⑥⑦]\s*[-:：]\s*)?\b([A-Z]{1,2}\d{2,3})\b/g,
+     (all,pre,id)=>REFS[id]?`<span class="ref" title="${esc(REFS[id].label)}">「${esc(REFS[id].gist)}」这条</span>`:all));
+  const groups=[];c.evidence.forEach(e=>{let g=groups.find(x=>x.row===e.row);if(!g)groups.push(g={row:e.row,label:e.row_label||e.row,items:[]});g.items.push(e)});
+  h+=`<details><summary>agent 的拆解依据（检查点表里的相关条目，${groups.length} 条）</summary><div class="ev">`+
+     groups.map(g=>`<div class="evg"><div class="evh">${esc(g.label)}</div>`+
+       g.items.map(e=>`<div><b>${esc(e.col)}</b>　${refx(md(e.val))}</div>`).join('')+'</div>').join('')+
+     '</div></details>';
   h+='<div class="opts">'+c.options.map((o,i)=>
      `<button class="opt ${v.choice===o.id?'sel':''}" onclick="pick('${c.cid}','${o.id.replace(/'/g,"\\'")}')"><kbd>${i+1}</kbd>`+
-     `<span>${esc(o.label)}${o.hint?`<em>${esc(o.hint)}</em>`:''}</span></button>`).join('')+'</div>';
-  if(c.per_row){const rv=v.rowvals||{};
-    h+=c.rows.map(r=>`<div style="display:flex;gap:8px;align-items:center;margin-bottom:6px">`+
+     `<span>${esc(o.label)}${o.default?'<em class="dflt">agent 默认假设</em>':''}${o.hint?`<em>${esc(o.hint)}</em>`:''}</span></button>`).join('')+'</div>';
+  const needVal=NEEDVAL.has(v.choice);
+  if(needVal&&c.per_row){const rv=v.rowvals||{};
+    h+='<div class="vlab">逐行写下正确的内容（不确定的行留空）</div>'+c.rows.map(r=>`<div style="display:flex;gap:8px;align-items:center;margin-bottom:6px">`+
       `<code class="mono" style="flex:none;min-width:112px;font-size:12px">${r.uid}</code>`+
-      `<input class="rv" data-row="${r.uid}" value="${esc(rv[r.uid]||'')}" placeholder="这行实际显示什么（不确定留空）" oninput="sync('${c.cid}')" onblur="reSave('${c.cid}')" style="margin:0"></div>`).join('');
-  }else{h+=`<input id="val" value="${esc(v.value)}" oninput="sync('${c.cid}')" onblur="reSave('${c.cid}')" placeholder="补充值（选「我来填」时必填，逐字抄）">`}
-  h+=`<textarea id="note" oninput="sync('${c.cid}')" onblur="reSave('${c.cid}')" placeholder="备注（可选）">${esc(v.note)}</textarea>`;
+      `<input class="rv" data-row="${r.uid}" value="${esc(rv[r.uid]||'')}" placeholder="这一行正确的内容是什么？" oninput="sync('${c.cid}')" onblur="reSave('${c.cid}')" style="margin:0"></div>`).join('');
+  }else if(needVal){h+=`<div class="vlab">你的答案</div><textarea id="val" class="ans" oninput="sync('${c.cid}')" onblur="reSave('${c.cid}')" `+
+     `placeholder="用一两句话写下正确的规则或取值，比如「只有企业账号必填，个人账号选填」。界面文案请照原样写，大小写、标点都别改">${esc(v.value)}</textarea>`}
+  h+=`<textarea id="note" oninput="sync('${c.cid}')" onblur="reSave('${c.cid}')" placeholder="备注（可选）：补充例外情况、适用范围或你的理由。agent 回填检查点表、生成用例时都会照着它来，写清楚能少一轮来回">${esc(v.note)}</textarea>`;
   h+=`<div style="display:flex;gap:8px;align-items:center"><button onclick="g0save()">下一张未答 ⏎</button>`+
      `<button onclick="g0jump(-1)">← 上一张</button><button onclick="g0jump(1)">下一张 →</button>`+
      (VD[c.cid]?`<button onclick="g0clear('${c.cid}')">清除本卡</button>`:'')+
@@ -503,7 +566,16 @@ function promote(cid){
   draw();
 }
 function setF(f){F=f;G0I=0;draw()}
-let SAVED=null;
+// 存盘反馈只就地改这一个小标签，**绝不 draw()**：重绘会重建输入框，用户正在打字的那个框
+// 会丢焦点（实锤：选完选项 1.5s 内点进备注框、或从补充框切到备注框触发失焦存盘，都会被重绘打断）
+let SVT=null;
+function flashSaved(){
+  const t=$('#svtag'); if(!t)return;
+  t.innerHTML='<span class="pill k-run">✓ 已存盘</span>';
+  clearTimeout(SVT); SVT=setTimeout(()=>{const t2=$('#svtag'); if(t2)t2.innerHTML=''},1500);
+}
+// 需要用户自己写答案的选项：只有选了它们，才出现「你的答案」输入框
+const NEEDVAL=new Set(['answer','fix']);
 // 把当前 DOM 里的输入采集进 VD —— **必须在任何 draw() 之前调用**，
 // 否则重绘会按 VD 重建输入框、把用户刚打的字冲掉（实锤过的 bug）
 function grab(cid){
@@ -521,12 +593,12 @@ function grab(cid){
 async function pick(cid,oid){
   const body={...grab(cid),cid,choice:oid,answered_at:new Date().toISOString()};
   VD[cid]={...body}; draw();
+  if(NEEDVAL.has(oid)){const f=$('#val')||document.querySelector('.rv'); if(f)f.focus()}  // 选了「我来说明」直接聚焦
   try{
     const r=await fetch(`/api/verdicts/${encodeURIComponent(TASK)}`,{method:'POST',
       headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     if(!r.ok)throw new Error('HTTP '+r.status);
-    VD[cid]=body; SAVED=cid; draw();
-    setTimeout(()=>{if(SAVED===cid){SAVED=null;draw()}},1500);
+    VD[cid]=body; flashSaved();
   }catch(e){
     delete VD[cid]; alert('没保存上：'+e.message+'\n服务可能已停，确认控制台端口还在跑再重试。'); draw();
   }
@@ -539,9 +611,8 @@ async function reSave(cid){                          // 失焦时把文字也落
     const r=await fetch(`/api/verdicts/${encodeURIComponent(TASK)}`,{method:'POST',
       headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     if(!r.ok)throw new Error('HTTP '+r.status);
-    VD[cid]={...body}; SAVED=cid; draw();
-    setTimeout(()=>{if(SAVED===cid){SAVED=null;draw()}},1500);
-  }catch(e){alert('备注没保存上：'+e.message)}
+    VD[cid]={...body}; flashSaved();                 // 不重绘：用户可能正在另一个框里打字
+  }catch(e){alert('没保存上：'+e.message)}
 }
 function g0jump(d){
   const L=g0list(); if(L[G0I])grab(L[G0I].cid);      // 翻卡前先把当前输入收进 VD
@@ -553,7 +624,7 @@ async function g0save(){
   const body={cid:c.cid,choice:v.choice,note:$('#note').value,answered_at:new Date().toISOString()};
   if(c.per_row){const rv={};document.querySelectorAll('.rv').forEach(el=>{if(el.value.trim())rv[el.dataset.row]=el.value.trim()});
     body.rowvals=rv;body.value=Object.entries(rv).map(([k,x])=>k+'='+x).join('; ')}
-  else body.value=($('#val')||{}).value||'';
+  else body.value=$('#val')?$('#val').value:(NEEDVAL.has(v.choice)?(v.value||''):'');
   await fetch(`/api/verdicts/${encodeURIComponent(TASK)}`,{method:'POST',
     headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   VD[c.cid]=body;
@@ -733,11 +804,47 @@ window.addEventListener('beforeunload',e=>{
 });
 document.addEventListener('keydown',e=>{
   if(VIEW!=='gate0'||['INPUT','TEXTAREA'].includes(e.target.tagName))return;
+  if($('#helpmask')&&$('#helpmask').classList.contains('on'))return;   // 说明弹窗开着时不响应选项快捷键
   const L=g0list(),c=L[G0I];if(!c)return;
   if(/^[1-9]$/.test(e.key)){const o=c.options[+e.key-1];if(o)pick(c.cid,o.id)}
   else if(e.key==='j')g0jump(1);else if(e.key==='k')g0jump(-1);
   else if(e.key==='Enter')g0save();
 });
+// ── 卡片类型说明（右上角「这些卡是什么？」）──
+const HELP=`<h3>这些卡是什么？为什么要你来判断？</h3>
+<p class="lead">agent 先把需求拆成一张张检查点表（每个功能点、每个字段、每种状态切换）。遇到需求没写清楚的地方，
+它<b>不会自己瞎猜</b>，而是标出来。这里只推给你<b>必须由人拍板</b>的那几条：你的答案会直接写进检查点表，
+后面生成的测试用例就照着你的答案写。答对一张卡，等于提前堵住一类"需求理解错了"的返工。</p>
+<h4>三种卡片</h4>
+<table>
+<tr><th>类型</th><th>是什么意思</th><th>你怎么答</th><th>答完之后会怎样</th></tr>
+<tr><td>⚠️ 冲突</td><td>需求里有两处说法打架（比如正文和变更日志、需求和设计图），agent 不知道该信哪一个。</td>
+<td>选你认为对的那一方；两边都不对就选「我来说明」写正确规则。</td>
+<td>采纳的一方成为用例依据；另一方会被记成"文档勘误"，建议同步给产品改需求。</td></tr>
+<tr><td>⚠️ 缺失</td><td>需求根本没提，agent 也推不出来，比如"老数据要不要也遵守新规则"。</td>
+<td>你知道答案就直接选或写；不知道就选「留给提测实测」。</td>
+<td>有答案的，按你的答案出用例；留给实测的，会变成一条"提测后去看实际行为"的检查项，不会漏掉。</td></tr>
+<tr><td>🔶 推断</td><td>需求没明说，agent 参照同类功能先填了一个答案。</td>
+<td>认同就选它；不对就改成正确的。</td>
+<td>认同后它就从"猜的"变成"确定的"，以后同类需求可以直接复用。</td></tr>
+</table>
+<h4>几个常见问题</h4>
+<ol>
+<li><b>「agent 默认假设」是什么？</b>如果你不改，agent 就按这个选项写用例。同意的话点它就行，最省事。</li>
+<li><b>拿不准怎么办？</b>选「我不确定，留给提测实测」永远是安全的：它不会被当成同意，只是把这个问题留到功能能用时再看。</li>
+<li><b>为什么只有这几张？</b>"提测时看一眼就知道"的问题（比如提示文案的具体措辞）已经自动放到页面底部，不占你的时间；你也可以展开把它们拉回来自己答。</li>
+<li><b>答完以后呢？</b>告诉 agent「审完了」→ 它把你的答案回填进检查点表 → 请你确认一次 → 生成正式测试用例和操作步骤（下一轮评审）。</li>
+<li><b>备注有什么用？</b>备注会和你的选项一起交给 agent：回填检查点表、生成用例时，它会把你写的例外、适用范围、补充条件一并体现进去。只选选项说不全的，写在备注里。</li>
+<li><b>答错了能改吗？</b>能。每张卡选完就自动保存，随时回来改选项；点「清除本卡」可以撤回。</li>
+</ol>
+<div style="text-align:right;margin-top:14px"><button onclick="hideHelp()">知道了</button></div>`;
+function showHelp(){let m=$('#helpmask');
+  if(!m){m=document.createElement('div');m.id='helpmask';m.className='mask';
+    m.innerHTML='<div class="dlg" role="dialog" aria-modal="true">'+HELP+'</div>';
+    m.addEventListener('click',e=>{if(e.target===m)hideHelp()});document.body.appendChild(m)}
+  m.classList.add('on')}
+function hideHelp(){const m=$('#helpmask');if(m)m.classList.remove('on')}
+document.addEventListener('keydown',e=>{if(e.key==='Escape')hideHelp()});
 boot();
 </script></body></html>"""
 
