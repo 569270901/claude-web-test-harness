@@ -63,6 +63,9 @@ description: 用 Playwright 实地探索目标页面，全量覆写 page_map/*.y
 - ❌ 不写测试代码、不写用例
 - ❌ 不改地图之外的非知识库文件
 - ❌ 不写没有实测证据的 selector（见上方验收标准）
+- ❌ **探索不许改现有数据**：只读探索挂 `utils/write_guard.WriteGuard`（登录完成之后再挂，放行刷新令牌类接口）；
+  想知道"提交会不会被客户端拦、会提交什么值"，用写保护当探针看被拦下的请求，不要真提交。必须真写的，只对自己造的对象做，
+  用完按完整名字精确删。详见 rule.md「只读与无痕」
 - ✅ 业务规则可补到知识库，但必须在 `sync.md` 的 `outputs.specs_updated` 声明
 - 发现新组件形态（如 popconfirm 无 role=dialog）→ 回写 rule.md 的探索 SOP
 

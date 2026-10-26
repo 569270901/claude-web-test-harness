@@ -15,7 +15,11 @@ import yaml
 # - pytest_case_ledger：每条用例的结果写进 artifacts/_runs/auto_runs.jsonl（区分 xfailed / xpassed_strict）
 # - pytest_guard：撞墙止损（同一定位连败 / 连续失败就停批），**默认关闭**，`--guard` 开启
 # - pytest_resume：断点续跑，**默认关闭**，`--batch <名字>` 开启
-pytest_plugins = ["tools.pytest_case_ledger", "tools.pytest_guard", "tools.pytest_resume"]
+# - pytest_suite_manifest：按 data/regression/*.yaml 回归清单自动打标记（`-m <清单名>` 选用例），只打标不改结果
+# - pytest_chrome_orphans：macOS + 正式版 Chrome 通道时，收尾释放占住 driver stderr 的孤儿进程，防止跑完不退出；
+#   其他平台无操作
+pytest_plugins = ["tools.pytest_case_ledger", "tools.pytest_guard", "tools.pytest_resume",
+                  "tools.pytest_suite_manifest", "tools.pytest_chrome_orphans"]
 
 
 @pytest.fixture(scope="session")
@@ -57,3 +61,35 @@ def td():
 #                        is_logged_in=lambda p: p.locator("#password").count() == 0)
 #
 # demo（TesterHome 只读流程）无需登录，故此处留空。
+
+
+# ── 接口错误断言（utils/response_capture.py）────────────────────────────────────────────
+# 抓包必须挂到用例**实际操作**的页面上。多角色用例常用 browser.new_context() 各开一个页面，
+# 若抓包只挂在默认 `page` 上，它一条响应都收不到，"没有接口报错"的断言恒为空——接口 500 用例照样绿。
+# 下面的 fixture 自动找出用例声明的所有 `*_page` fixture 并全部挂上；一个都没有时回退到默认 `page`。
+# demo 用例不用它，所以默认注释掉；接入你的项目时取消注释并按需改 url_filter / business_error：
+#
+# import re
+# from utils.response_capture import ResponseCapture, assert_no_error_responses, code_field_checker
+#
+# _CAPTURE_PAGE_FIXTURES = re.compile(r"^\w+_page$")       # 你的角色页面 fixture 命名规则
+#
+# @pytest.fixture
+# def capture(request):
+#     names = [n for n in request.fixturenames if _CAPTURE_PAGE_FIXTURES.match(n)]
+#     pages = [request.getfixturevalue(n) for n in names] or [request.getfixturevalue("page")]
+#     cap = ResponseCapture(pages, url_filter="/api/",                  # 只看自家接口，排除埋点 / CDN
+#                           business_error=code_field_checker("code", success=(0, 200)))  # 可选：HTTP 200 但业务码非成功也算错
+#     cap.start()
+#     yield cap
+#     cap.stop()
+#
+# 用例里：
+#     def test_xxx(admin_page, capture):
+#         ...操作...
+#         assert_no_error_responses(capture)          # 报错带出 方法 + 接口路径 + 状态码 / 业务 msg
+#
+# ── 只读用例写保护（utils/write_guard.py）/ 数据足迹（utils/footprint.py）──────────────────
+# 只读用例：guard = WriteGuard(page) → 操作 → guard.assert_clean()；登录 / 刷新令牌类接口默认放行，按项目改 pass_through。
+# 会写数据的用例：只动自己新建的对象（名字带测试前缀），建了就 Footprint().created(完整名字)，
+# 删了就 .deleted()；残留用 tools/cleanup_footprint.py 按完整名字精确清理（默认 dry-run）。

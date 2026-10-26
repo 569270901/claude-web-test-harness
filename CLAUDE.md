@@ -68,6 +68,9 @@ python3 scripts/check_compliance.py --staged   # 只扫本次待提交的文件
 - `expected` 避免用 `"0"`，用有语义的值
 - 注释用中文
 - selector 优先 ID / role / 稳定属性，禁用 hash class / `:nth-child` / xpath 位置索引（详见 `rule.md`）
+- **不动现有数据**：只写自己造的对象（名字带前缀 + 时间戳），清理按完整名字精确匹配、绝不按前缀批量删；
+  只读用例挂写保护 `utils/write_guard.WriteGuard`；有风险（全局配置、发通知、可能锁账号）就只测只读。详见 `rule.md`「只读与无痕」
+- **断言要真的在断言**：抓包断言挂在用例实际用的页面上（否则恒为空、永远通过），同时看 HTTP 状态和响应体里的业务码
 
 ---
 

@@ -219,7 +219,9 @@ created_at: ...
 7. ❌ 不**直接**改 `page_map/*.yaml`（要让 page-map-sync 改）
    - 例外：cases.md 的 page_ref 是错的（你以为 yaml 是 X 实际是 Y），可以**改 cases.md 的引用**而不是改 page_map
 8. ❌ 不省略 `progress.log`（每轮自跑前后都要发）
-9. 真 bug → `status=likely_bug` 并保留完整断言（用 `xfail(strict=True)` 标记），不许改断言迁就
+9. 真 bug → `status=likely_bug` 并保留完整断言（用 `xfail(strict=True)` 标记），不许改断言迁就；
+   写完用 `--runxfail --no-guard` 审计一遍，确认失败的正好是预期那条断言。版本验收后 xfail 要有出口：
+   修了就摘，不修就改成按现状守护（见 rule.md「测试设计」）
 
 ## 必发 progress.log
 

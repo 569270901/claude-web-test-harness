@@ -1,0 +1,25 @@
+# 版本回归清单 —— 结构示例（tools/pytest_suite_manifest.py 消费）
+#
+# 用途：`python -m pytest -m example` 一条命令跑完本清单圈定的用例。
+# 清单即真相：新增 / 删除某个版本的回归用例只改这里，插件在收集阶段自动打上 `example` 标记，不用改测试代码。
+# 接入你的项目时：每个版本 / 每组特性复制一份（如 release_2_3.yaml，suite: release_2_3），本示例可删。
+#
+# 字段：
+#   suite     标记名（-m 后面写的名字）；省略则用 version 字段，再省略用文件名
+#   features  特性列表；id 会写进用例的 user_properties（suite_feature），报表可按特性汇总
+#   entries   file = 相对仓库根的测试文件路径，只写 file 表示整个文件都算；
+#             tests = 只算函数名以这些前缀开头的用例（参数化 id 不影响匹配）
+#   name / spec / task 等其他字段插件不读，留给人看（建议写清特性说明和需求出处）
+suite: example
+features:
+  - id: DEMO-HOME
+    name: 示例站点首页可访问、标题正确
+    entries:
+      - file: tests/test_home.py
+        tests: [test_home_title]
+
+  - id: DEMO-TOPICS
+    name: 示例站点首页话题列表存在
+    entries:
+      - file: tests/test_home.py
+        tests: [test_home_has_topic_links]

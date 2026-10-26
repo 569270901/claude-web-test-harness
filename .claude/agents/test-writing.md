@@ -83,10 +83,18 @@ description: 读 confirmed cases.md + flow.md，生成测试代码 + 数据，�
 - ❌ **禁止为 `exec: manual` / `exec: blocked` 的行写脚本**，也**禁止把它们算进覆盖率分母**。
   `exec` 是用户在 GATE 1 定的硬契约，不是建议；不服就在 impl.md 里写明理由交还用户，不许自己改
 - ❌ **禁止删除/弱化断言**，禁止把 expected 改成空/"0"/"-" 来匹配实际值
+- ❌ **禁止动现有数据**：写操作只对自己造的对象（名字带前缀 + 时间戳）；清理按完整名字精确删，绝不按前缀批量删；
+  只读用例挂 `utils/write_guard.WriteGuard` 并在结束时 `assert_clean()`；造了就登记 `utils/footprint.py` 台账，夹具 teardown 负责清，
+  删不掉的停用并记台账。会发通知、改全局配置、可能锁账号的操作只测只读。详见 rule.md「只读与无痕」
+- ❌ **禁止空断言**：抓包断言必须挂在用例实际用的页面上（`utils/response_capture.py`）；写完至少验证一次它能抓到错误响应
 - ❌ selector 不用通配 / `:nth-child` / xpath 位置索引
 - ❌ 不直接改 page_map（例外：cases.md 的 page_ref 引用写错可改引用本身）
 - ✅ 修地图 vs 修代码必须写决策依据进 impl.md 自修日志
 - 真 bug → `status: likely_bug` 保留完整断言（用 xfail(strict=True)），不许改断言迁就
+- **xfail 写完要审计**：`python -m pytest <文件> --runxfail --no-guard`，确认每条 xfail 的失败信息**正好是预期的那条断言**，
+  而不是被吞掉的 selector / 时序错误（普通跑会把这些也算成 xfailed）
+- **版本验收后的 xfail 出口**：开发修了的摘掉 xfail；确认不修、按现状上线的，改成按现状守护的断言（docstring 写明和需求的差异），
+  不要让 xfail 一直挂着。本版本的用例登记进 `data/regression/<清单名>.yaml`，便于 `-m <清单名>` 一次回归
 
 ## 运行日志 journal（叙事层 —— 重点）
 
