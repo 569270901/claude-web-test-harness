@@ -294,7 +294,10 @@ font-size:11.5px;overflow-x:auto;white-space:pre;margin:0}
 let D=null,F='all',OPEN={};
 const $=s=>document.querySelector(s);
 const esc=s=>(s||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
-const md=s=>esc(s).replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>').replace(/`([^`]+)`/g,'<code>$1</code>');
+const TN={'①':'功能点清单','②':'字段规格表','③':'状态流转表','④':'业务规则表','⑤':'操作流程','⑥':'影响范围','⑦':'控件规格表'};
+const humanRef=s=>(s||'').replace(/([①-⑦])\s*[-:：]?\s*[A-Z]{1,2}(\d{1,3})(?:\s*[–~-]\s*[A-Z]{0,2}(\d{1,3}))?/g,
+  (m,t,a,b)=>`${TN[t]}第 ${+a}${b?'–'+(+b):''} 条`).replace(/,\s*/g,'、');
+const md=s=>esc(s).replace(/&lt;br\s*\/?&gt;/gi,'<br>').replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>').replace(/`([^`]+)`/g,'<code>$1</code>');
 const AS={passed:'通过',failed:'失败',error:'错误',skipped:'跳过',xfailed:'已知缺陷(预期失败)',xpassed:'意外通过',xpassed_strict:'⚠️意外通过(疑似已修复,待复核)'};
 const MS={pass:'通过',fail:'失败',blocked:'阻塞',skip:'跳过'};
 
@@ -367,7 +370,7 @@ function card(c){
      `<dt>期望</dt><dd>${md(c.expect)||'—'}</dd>`+
      `<dt>依据</dt><dd>${md(c.prd_ref)||'—'}</dd>`+
      `<dt>page_ref</dt><dd>${md(c.page_ref)||'—'}</dd>`+
-     `<dt>溯源</dt><dd class="mono" style="font-size:11.5px">${esc(c.derived_from)}　·　cases.md:${c.line_no}</dd></dl>`;
+     `<dt>对应检查点</dt><dd style="font-size:12.5px">${esc(humanRef(c.derived_from))}<span class="t mono">　·　cases.md 第 ${c.line_no} 行</span></dd></dl>`;
   h+='<div class="lanes">';
   // 自动化泳道
   h+='<div class="lane"><h4><span>自动化执行</span><span class="t mono">auto_runs.jsonl</span></h4>';

@@ -560,6 +560,10 @@ frontmatter 写 `prd_version: none (tier C)`（或 `none (tier B)`），
 
 ## 五、decomp.md schema
 
+> **格式的唯一出处是模板** `artifacts/templates/decomp.template.md`：阶段1 起手先 `cp` 它，再往里填，不要凭下面这段说明重新搭表头。
+> 评审控制台和 `python3 tools/gate_review.py check <task_id>` 都按模板的列名核对；frontmatter 的 `contract` 字段标明本清单按哪一版契约写的
+> （当前 v2：解构债清单带「问题 / 背景 / 选项」、人读列不用代号；改了卡片依赖的格式就升版本号）。
+
 ```yaml
 ---
 task_id: <id>

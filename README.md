@@ -277,7 +277,10 @@ The two confirmation points don't have to happen by reading raw markdown in a te
 a small local console (pure standard library, nothing to install) that opens in your browser:
 
 ```bash
-python3 tools/qa_console.py            # one port, pick the version → the feature → the view
+python3 tools/qa_console.py ensure 8900   # one port, pick the version → the feature → the view
+# ensure = make sure what's on 8900 runs the CURRENT code: reuse it if fresh, replace it if stale or pre-versioning.
+# Always start the console this way after updating harness code — it is a long-running process and never notices file changes;
+# a banner at the top of the page tells you when the code on disk is newer than what's running
 ```
 
 What it gives you:

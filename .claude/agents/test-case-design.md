@@ -188,8 +188,12 @@ A/B 而图上有 C；需求说没这个字段而图上有）才算真冲突 → 
    **［需判断］和 ⚠️冲突 的债填「问题 / 背景 / 选项」三列**（写给评审人看的人话，一卡一问，
    选项是具体答案、工作假设标 `（默认）`，写法见 decomposition.md「写给评审人的三列」）
    **所有人读列都不许用代号指代别的条目**——要提就复述内容或指向需求原文位置（见「会被人读到的文字」）
-5. 写 `artifacts/<task_id>/decomp.md`，`status: pending_review`
-6. **阶段1 到此为止**——不产 cases.md、不产 flow.md
+5. 写 `artifacts/<task_id>/decomp.md`，`status: pending_review`。**起手先复制模板再填，不要自己搭表头**：
+   `cp artifacts/templates/decomp.template.md artifacts/<task_id>/decomp.md`
+   （列名、frontmatter 的 `contract` 字段、模板里的注释说明都以它为准；不增删列、不改列名；注释交付前删掉）
+6. **交付前必须跑 `python3 tools/gate_review.py check <task_id>`，错误数为 0**——它会核对列名、「问题 / 背景 / 选项」是否填全、
+   人读列里有没有代号。有错就改，改到 0 才能返回。评审控制台也会在界面上亮出同样的问题
+7. **阶段1 到此为止**——不产 cases.md、不产 flow.md
 
 ### 阶段1 关键纪律
 

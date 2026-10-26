@@ -32,12 +32,55 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 ROOT = HERE.parent
 
-from gate_review import paths, load_verdicts, save_verdicts          # noqa: E402,F401
-from gate_review_ui import build_cards                               # noqa: E402
-import case_console                                                  # noqa: E402
-import cases_edit                                                    # noqa: E402
+try:
+    from gate_review import paths, load_verdicts, save_verdicts      # noqa: E402,F401
+    from gate_review_ui import build_cards                           # noqa: E402
+    import case_console                                              # noqa: E402
+    import cases_edit                                                # noqa: E402
+except SyntaxError as _e:
+    # 磁盘上的代码有语法错误：说清楚是哪个文件哪一行，而不是甩一屏 traceback。
+    # `ensure` 走到这里时还没动过任何进程——正在跑的旧控制台不受影响。
+    if len(sys.argv) > 1 and sys.argv[1] == "ensure":
+        print(f"✗ 磁盘上的控制台代码有语法错误，没有重启（正在运行的旧进程不受影响）：\n"
+              f"  {Path(_e.filename or '?').name} 第 {_e.lineno} 行：{_e.msg}")
+        sys.exit(1)
+    raise
 
 UNVERSIONED = "未归版"
+
+# ───────────── 代码指纹：让「磁盘上的代码比运行中的新」这件事可被发现 ─────────────
+# 事故（2026-10）：控制台是长驻进程，启动时把页面和出卡逻辑读进内存；之后改了磁盘上的代码，
+# 老进程浑然不觉，agent 又照文档"端口被占用就沿用"，于是所有改动都不生效。
+# 做法：进程启动时算一次指纹（它真正 import 进来的 tools/*.py + 配置），之后每次请求都能拿
+# 磁盘现状再算一次比对；页面和 `ensure` 命令都靠它判断是否过期。
+import hashlib
+import os
+import subprocess
+import urllib.error
+import urllib.request
+
+
+def _code_files() -> list:
+    files = [Path(m.__file__).resolve() for m in list(sys.modules.values())
+             if getattr(m, "__file__", None) and Path(m.__file__).resolve().parent == HERE]
+    cfg = ROOT / "configs" / "gate_review.json"
+    if cfg.exists():
+        files.append(cfg.resolve())
+    return sorted(set(files))
+
+
+def code_hash() -> str:
+    h = hashlib.sha1()
+    for f in _code_files():
+        try:
+            h.update(f.name.encode() + f.read_bytes())
+        except OSError:
+            pass
+    return h.hexdigest()[:8]
+
+
+STARTED_HASH = code_hash()
+STARTED_AT = time.strftime("%Y-%m-%d %H:%M:%S")
 
 
 # ─────────────────────────── 索引 ───────────────────────────
@@ -175,7 +218,11 @@ class Handler(BaseHTTPRequestHandler):
         p = urlparse(self.path).path
         try:
             if p == "/":
-                return self._send(200, PAGE, "text/html; charset=utf-8")
+                return self._send(200, PAGE.replace("__BUILD__", STARTED_HASH), "text/html; charset=utf-8")
+            if p == "/api/version":
+                disk = code_hash()
+                return self._json({"started": STARTED_HASH, "disk": disk, "stale": disk != STARTED_HASH,
+                                   "pid": os.getpid(), "started_at": STARTED_AT, "root": str(ROOT)})
             if p == "/api/index":
                 return self._json(discover())
             m = re.match(r"^/api/(gate0|cases)/(.+)$", p)
@@ -392,14 +439,46 @@ font-family:"IBM Plex Mono",monospace}
 .divmsg{background:var(--surf2);border-left:3px solid var(--warn);padding:8px 11px;font-size:12.5px;
 margin-bottom:12px;border-radius:0 4px 4px 0}
 .err{background:var(--surf);border:1px solid var(--bad);color:var(--bad);border-radius:7px;padding:14px 18px}
+#fresh{background:#fff4d6;color:#5b4300;border-bottom:1px solid #e8d49a;padding:8px 20px;font-size:13px;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+#fresh:empty{display:none}
+#fresh code{background:rgba(0,0,0,.07);padding:1px 6px;border-radius:3px}
+#fresh.bad{background:#fde8e6;color:#7a1f16;border-color:#efb7b1}
+.cbar{background:#fff4d6;color:#5b4300;border:1px solid #e8d49a;border-radius:8px;padding:12px 16px;margin-bottom:14px;font-size:13.5px;line-height:1.7}
+.cbar b{font-weight:600}
+.cbar ul{margin:6px 0 0;padding-left:20px;color:#6b5513}
 </style></head><body>
+<div id="fresh"></div>
 <header><div class="nav" id="nav"></div><div class="fil" id="fil"></div></header>
 <main id="app">加载中…</main>
 <script>
 let IDX=null,VIEW='index',TASK=null,DATA=null,F='all',OPEN={},VD={},G0I=0;
 const $=s=>document.querySelector(s);
+const BUILD='__BUILD__';            // 这个页面是哪一版代码渲染出来的（服务端注入）
+// 新鲜度检查：①页面比服务端旧 → 提示刷新；②服务端比磁盘上的代码旧 → 提示重启（进程是长驻的，改了文件它不知道）
+async function checkFresh(){
+  const box=$('#fresh'); if(!box)return;
+  try{
+    const v=await (await fetch('/api/version',{cache:'no-store'})).json();
+    box.className='';
+    if(v.started!==BUILD)box.innerHTML='<span>控制台刚更新过，这个页面还是旧版本。</span><button onclick="location.reload()">刷新页面</button>';
+    else if(v.stale)box.innerHTML=`<span>磁盘上的控制台代码已经更新，但正在运行的进程还是旧的——新改动现在<b>不会生效</b>。重启：</span><code>python3 tools/qa_console.py ensure ${location.port}</code>`;
+    else box.innerHTML='';
+  }catch(e){box.className='bad';box.innerHTML='<span>连不上控制台服务了（可能已停止）。你刚做的选择如果没看到「已存盘」，请重启后再确认一次。</span>'}
+}
+// 检查点清单没按当前契约写：卡片会难读或缺选项，别让评审人对着它干猜
+function contractBar(){
+  const c=DATA&&DATA.contract; if(!c||!(DATA.frontmatter||{}).status||DATA.frontmatter.status!=='pending_review')return '';
+  const errs=(c.issues||[]).filter(i=>i.level==='error'); if(!errs.length)return '';
+  return `<div class="cbar"><b>这份检查点清单没有完全按新版格式写（${errs.length} 处问题）</b>，下面的卡片可能难读，或者缺少具体选项。`+
+    `建议先让 test-case-design 按模板（<code>artifacts/templates/decomp.template.md</code>）修订后再审，省得你对着速记猜。`+
+    `<details><summary>具体是哪些问题</summary><ul>${errs.map(i=>`<li>${esc(i.msg)}</li>`).join('')}</ul></details></div>`;
+}
 const esc=s=>(s||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
-const md=s=>esc(s).replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>').replace(/`([^`]+)`/g,'<code>$1</code>');
+const TN={'①':'功能点清单','②':'字段规格表','③':'状态流转表','④':'业务规则表','⑤':'操作流程','⑥':'影响范围','⑦':'控件规格表'};
+// 「④-R02, ③-S04」→「业务规则表第 2 条、状态流转表第 4 条」：评审人看不懂编号，agent 对账用的原始编号仍留在 cases.md
+const humanRef=s=>(s||'').replace(/([①-⑦])\s*[-:：]?\s*[A-Z]{1,2}(\d{1,3})(?:\s*[–~-]\s*[A-Z]{0,2}(\d{1,3}))?/g,
+  (m,t,a,b)=>`${TN[t]}第 ${+a}${b?'–'+(+b):''} 条`).replace(/,\s*/g,'、');
+const md=s=>esc(s).replace(/&lt;br\s*\/?&gt;/gi,'<br>').replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>').replace(/`([^`]+)`/g,'<code>$1</code>');
 const AS={passed:'通过',failed:'失败',error:'错误',skipped:'跳过',xfailed:'已知缺陷(预期失败)',xpassed:'意外通过',xpassed_strict:'⚠️意外通过(疑似已修复,待复核)'};
 const MS={pass:'通过',fail:'失败',blocked:'阻塞',skip:'跳过'};
 const VIEWNAME={gate0:'GATE 0 评审',cases:'用例执行'};
@@ -424,7 +503,7 @@ async function load(){
 function taskOf(id){for(const g of IDX.versions)for(const t of g.tasks)if(t.task_id===id)return{...t,version:g.version};return null}
 
 function nav(){
-  let h=`<h1 onclick="location.hash='#/'">QA 控制台</h1>`;
+  let h=`<h1 onclick="location.hash='#/'" title="控制台代码版本 ${BUILD}">QA 控制台</h1>`;
   if(VIEW==='index'){
     const n=IDX.versions.reduce((a,g)=>a+g.tasks.length,0);
     h+=`<span class="sep">·</span><span class="mono" style="font-size:12px;color:var(--ink3)">${IDX.versions.length} 个版本 / ${n} 个需求</span>`;
@@ -487,7 +566,7 @@ function drawGate0(){
     const lab=f==='all'?'全部':(cs.find(x=>x.kind===f)||{}).kind_label||f;
     return `<button class="${F===f?'on':''}" onclick="setF('${f}')">${lab} ${n}</button>`}).join('');
   const L=g0list();
-  if(!L.length)return $('#app').innerHTML='<div class="card">这个筛选下没有待决项。</div>';
+  if(!L.length)return $('#app').innerHTML=contractBar()+'<div class="card">这个筛选下没有待决项。</div>';
   if(G0I>=L.length)G0I=L.length-1;
   const c=L[G0I],v=VD[c.cid]||{};
   const blk=b=>`<div class="prdb${b.likely?' lk':''}"><div class="prdh"><span class="mono">需求文档 第 ${b.line} 行</span>`+
@@ -553,7 +632,7 @@ function drawGate0(){
       ).join('')+'</div>';
     }
   }
-  $('#app').innerHTML=h;
+  $('#app').innerHTML=contractBar()+h;
 }
 let SHOW_DEF=false;
 function toggleDeferred(){SHOW_DEF=!SHOW_DEF;draw()}
@@ -699,7 +778,7 @@ function ccard(c){
   h+=`<div style="margin-bottom:10px"><button onclick="startEdit('${c.id}')">编辑这条</button></div>`;
   h+=`<dl class="meta"><dt>前置</dt><dd>${md(c.pre)||'—'}</dd><dt>步骤</dt><dd>${md(c.steps)||'—'}</dd>`+
      `<dt>期望</dt><dd>${md(c.expect)||'—'}</dd><dt>依据</dt><dd>${md(c.prd_ref)||'—'}</dd><dt>page_ref</dt><dd>${md(c.page_ref)||'—'}</dd>`+
-     `<dt>溯源</dt><dd class="mono" style="font-size:11.5px">${esc(c.derived_from)}　·　cases.md:${c.line_no}</dd></dl>`;
+     `<dt>对应检查点</dt><dd style="font-size:12.5px">${esc(humanRef(c.derived_from))}<span class="t mono">　·　cases.md 第 ${c.line_no} 行</span></dd></dl>`;
   h+='<div class="lanes"><div class="lane"><h4><span>自动化执行</span><span class="t mono">auto_runs.jsonl</span></h4>';
   if(c.map_gap)h+='<p class="hint">⚠️ 卡在 page_map 缺口上，探索补完前跑不了自动化——先走人工。</p>';
   h+=`<pre class="cmd">python -m pytest -p tools.pytest_case_ledger \\
@@ -845,14 +924,98 @@ function showHelp(){let m=$('#helpmask');
   m.classList.add('on')}
 function hideHelp(){const m=$('#helpmask');if(m)m.classList.remove('on')}
 document.addEventListener('keydown',e=>{if(e.key==='Escape')hideHelp()});
+checkFresh();
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)checkFresh()});
+setInterval(checkFresh,30000);
 boot();
 </script></body></html>"""
+
+
+def _probe(port: int):
+    """探端口上跑的是什么：返回 ('none'|'fresh'|'stale'|'old'|'other', 版本信息)。
+    old = 是控制台但没有 /api/version（本机制上线前启动的老进程，必然过期）。"""
+    base = f"http://127.0.0.1:{port}"
+    try:
+        with urllib.request.urlopen(base + "/api/version", timeout=2) as r:
+            v = json.loads(r.read().decode("utf-8"))
+            return ("stale" if v.get("stale") or v.get("started") != code_hash() else "fresh"), v
+    except urllib.error.HTTPError:
+        pass                                   # 有服务但没这个接口：可能是老控制台，也可能是别的程序
+    except Exception:
+        try:                                   # 连不上 / 超时：再确认是不是真没人监听
+            urllib.request.urlopen(base + "/", timeout=1)
+        except urllib.error.HTTPError:
+            return ("other", {})
+        except Exception:
+            return ("none", {})
+    try:
+        with urllib.request.urlopen(base + "/", timeout=2) as r:
+            return ("old", {}) if "QA 控制台" in r.read().decode("utf-8", "ignore") else ("other", {})
+    except Exception:
+        return ("other", {})
+
+
+def _listener_pid(port: int):
+    out = subprocess.run(["lsof", "-nP", f"-iTCP:{port}", "-sTCP:LISTEN", "-t"],
+                         capture_output=True, text=True).stdout.split()
+    return int(out[0]) if out else None
+
+
+def cmd_ensure(port: int) -> int:
+    """保证 port 上跑的是**当前磁盘代码**的控制台：已是最新就沿用；过期 / 老进程就替换；没有就启动。
+    GATE 评审前统一用它起控制台，不要再用「端口被占用就沿用」——长驻进程不会自己更新。"""
+    url = f"http://localhost:{port}"
+    state, v = _probe(port)
+    if state == "fresh":
+        print(f"✓ 已是最新代码（版本 {v['started']}，pid {v['pid']}）：{url}")
+        return 0
+    if state == "other":
+        print(f"✗ 端口 {port} 被别的程序占用（不是 QA 控制台），换个端口：python3 tools/qa_console.py ensure {port + 1}")
+        return 2
+    # 先确认磁盘上的新代码能编译；有语法错误就别杀正在工作的旧进程
+    bad = []
+    for f in _code_files():
+        if f.suffix == ".py":
+            try:
+                compile(f.read_text(encoding="utf-8"), str(f), "exec")      # 只查语法，不写任何 .pyc
+            except SyntaxError as e:
+                bad.append(f"{f.name} 第 {e.lineno} 行: {e.msg}")
+    if bad:
+        print("✗ 磁盘上的控制台代码有语法错误，没有重启（旧进程继续跑旧版）：\n  " + "\n  ".join(bad))
+        return 1
+    if state in ("stale", "old"):
+        pid = _listener_pid(port)
+        what = "老进程（没有版本接口）" if state == "old" else f"过期进程（运行的是 {v.get('started')}，磁盘是 {code_hash()}）"
+        print(f"· 端口 {port} 上是{what}，pid {pid}，替换它……")
+        if pid:
+            os.kill(pid, 15)
+            for _ in range(30):
+                if _listener_pid(port) is None:
+                    break
+                time.sleep(0.1)
+            else:
+                os.kill(pid, 9)
+                time.sleep(0.3)
+    log = Path(os.environ.get("TMPDIR", "/tmp")) / f"qa_console_{port}.log"
+    with open(log, "ab") as lf:
+        subprocess.Popen([sys.executable, str(Path(__file__).resolve()), "serve", str(port)],
+                         cwd=str(ROOT), stdout=lf, stderr=subprocess.STDOUT, start_new_session=True)
+    for _ in range(50):
+        time.sleep(0.2)
+        st, nv = _probe(port)
+        if st == "fresh":
+            print(f"✓ 已启动最新代码（版本 {nv['started']}，pid {nv['pid']}）：{url}\n  日志：{log}")
+            return 0
+    print(f"✗ 启动后 10 秒内没起来，看日志：{log}")
+    return 1
 
 
 if __name__ == "__main__":
     cmd = sys.argv[1] if len(sys.argv) > 1 else "serve"
     if cmd == "index":
         cmd_index()
+    elif cmd == "ensure":
+        sys.exit(cmd_ensure(int(sys.argv[2]) if len(sys.argv) > 2 else 8900))
     elif cmd == "serve":
         port = int(sys.argv[2]) if len(sys.argv) > 2 else 8900
         d = discover()

@@ -511,3 +511,18 @@ session 级 fixture 返回的 page 跨用例会失效。正解是**缓存登录�
 - **六维雷达标签在 SVG 内**：`svg[width='360']` 里的维度标签是 `<text>`（KPR/SURVIVING/ADR/KAST/IMPACT），className 是 SVGAnimatedString，`evaluate` 里别用 `e.className.slice()`。RATING 维度另有 DIV 卡片。用 `svg text:has-text('KPR')` 定位。
 - **分享 = 复制链接**：点「分享」把 `/player/<id>` URL 写入剪贴板并弹 `role=alert` 的「已复制！」toast；新建 context 时给 `permissions=["clipboard-read","clipboard-write"]` 才能读剪贴板。
 - **雷达 hover tooltip 未确认**：headless 下扫雷达顶点未捕获到 tooltip，是否存在 hover 提示待人工/headed 复核。
+
+## 长驻进程不会热更新：改了代码要重启，且"端口被占用就沿用"是错的（2026-10）
+
+**坑**：评审控制台是长驻的 Python 进程，启动时把页面和出卡逻辑读进内存。之后改了磁盘上的代码，老进程浑然不觉；
+文档又写着"端口被占用时无需重启（每次请求都读磁盘）"——这句话只对 **decomp.md 这类数据**成立，对**代码和页面**不成立。
+结果是连续几轮界面改进，在用户那边一条都没生效，用户开新窗口跑新需求才发现，老进程是三天前启动的。
+另一层：长期开着的 agent 会话用的是**启动时加载**的旧 agent 定义，也可能产出旧格式的清单。
+
+**做法**：
+- 起控制台一律 `python3 tools/qa_console.py ensure <端口>`，不要自己判断"端口占着就沿用"。它按代码指纹判断：
+  最新就沿用，过期或没有版本接口的老进程就替换，磁盘代码有语法错误时**不杀**正在跑的旧进程
+- 任何长驻服务都要能回答"我现在跑的是哪一版代码"：启动时记指纹、暴露接口、页面在过期时提示（见 `/api/version` 与页面顶部提示条）
+- 靠文字约束 agent 不可靠：格式用**模板**（`artifacts/templates/`）固定，用 `gate_review.py check` 机器核对，
+  不合规在界面上亮出来，而不是静默退化成难读的卡片
+

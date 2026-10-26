@@ -395,6 +395,8 @@ def code_refs(doc: dict) -> list[dict]:
         hdr = sec["header"] or []
         if not hdr or not sec["rows"]:
             continue
+        if sec["key"] not in CORE_KEYS and sec["key"] != DEBT_KEY:
+            continue          # 「输入档位判定」「输入核对记录」等辅助表是 agent 的工作底稿，不进评审卡片
         allow = REF_COLS | (REF_COLS_DEBT if "债ID" in hdr else set())
         # 矩阵类表（如状态机 N×N 总览）没有「置信度」列，DBT 编号只能写在格子里——它是控制台把格子归到
         # 决策卡的依据，前端显示时会自动去掉；这种表只放行 DBT，行号类代号照样要改成人话
@@ -417,6 +419,118 @@ def code_refs(doc: dict) -> list[dict]:
     return hits
 
 
+# ─────────────────────── 契约检查（check 命令 / 控制台「清单不合规」提示） ───────────────────────
+# 为什么要有：契约写在 agent 定义和方法论文档里，是**文字约束**——长期开着的会话用的是启动时加载的
+# 旧 agent 定义，agent 也可能漏填。靠自觉不行，要机器核对。格式的唯一出处是
+# artifacts/templates/decomp.template.md（agent 起手复制它），这里按它的列名核对。
+#
+# CONTRACT_VERSION：评审卡片依赖的 decomp.md 格式版本。改了「卡片读哪些列」这类会让旧清单显示变差的
+# 约定，就把它加 1，并同步改模板 frontmatter 的 contract 字段。
+#   v1  卡片标题取「描述」列（agent 速记）
+#   v2  解构债清单带「问题 / 背景 / 选项」三列，人读列不许用代号
+CONTRACT_VERSION = 2
+TEMPLATE = ROOT / "artifacts" / "templates" / "decomp.template.md"
+CORE_KEYS = ["①", "②", "③", "④", "⑤", "⑥", "⑦"]
+DEBT_KEY = "解构债清单"
+DEBT_NEED_COLS = ["问题", "背景", "选项"]
+_JUDGE_RE = re.compile(r"需判断|冲突")
+_SETTLED_RE = re.compile(r"\s*(answered|verified)", re.I)
+
+
+def _template_headers() -> dict:
+    """模板里各核心表 / 债清单的表头 {表键: [表头列表, ...]}。模板缺失时返回空（不核对列名）。"""
+    if not TEMPLATE.exists():
+        return {}
+    doc = parse_md(TEMPLATE)
+    out: dict = {}
+    for sec in doc["sections"]:
+        if sec["header"] and (sec["key"] in CORE_KEYS or sec["key"] == DEBT_KEY):
+            out.setdefault(sec["key"], []).append([h.strip() for h in sec["header"]])
+    return out
+
+
+def _split_options(raw: str) -> list[str]:
+    return [x.strip() for x in re.split(r"[；;]\s*|<br\s*/?>", raw or "") if x.strip()]
+
+
+def check_contract(doc: dict) -> list[dict]:
+    """按当前契约核对一份 decomp.md，返回 [{level: error|warn, msg: ...}]。"""
+    issues: list[dict] = []
+
+    def add(level, msg):
+        issues.append({"level": level, "msg": msg})
+
+    fm = doc["frontmatter"]
+    cv = str(fm.get("contract") or "").strip()
+    if not cv:
+        add("warn", f"frontmatter 缺少 contract: {CONTRACT_VERSION}（按模板创建的清单会自带；缺失说明"
+                    f"可能没按模板写，或 agent 用的还是旧版定义）")
+    elif cv.isdigit() and int(cv) < CONTRACT_VERSION:
+        add("error", f"这份清单是按 v{cv} 契约生成的，当前契约是 v{CONTRACT_VERSION}，需要按模板重写")
+
+    tpl = _template_headers()
+    secs = [s for s in doc["sections"] if s["header"]]
+    for key in CORE_KEYS:
+        tables = [s for s in secs if s["key"] == key]
+        if not tables:
+            add("error", f"缺少核心表 {key}")
+            continue
+        want = (tpl.get(key) or [None])[0]
+        if not want:
+            continue
+        best = max(tables, key=lambda s: len(set(want) & {h.strip() for h in s["header"]}))
+        missing = [c for c in want if c not in {h.strip() for h in best["header"]}]
+        if missing:
+            add("error", f"表{key}的列和模板不一致：缺少「{'」「'.join(missing)}」（不许增删列、不许改列名）")
+
+    debt = next((s for s in secs if s["key"] == DEBT_KEY), None)
+    if not debt:
+        add("error", f"缺少「{DEBT_KEY}」")
+    else:
+        hdr = [h.strip() for h in debt["header"]]
+        lack = [c for c in DEBT_NEED_COLS if c not in hdr]
+        if lack:
+            add("error", f"{DEBT_KEY}缺少「{'」「'.join(lack)}」列——评审卡片只能显示 agent 的速记描述，"
+                         f"评审人看不懂在问什么")
+        else:
+            for r in debt["rows"]:
+                d = dict(zip(hdr, [c.strip() for c in r["cells"]]))
+                if _SETTLED_RE.match(d.get("状态", "")):
+                    continue
+                if not _JUDGE_RE.search(" ".join(d.values())):
+                    continue          # ［可提测］ 的债三列可以填 —
+                did = (d.get("债ID") or "?").strip("*` ")
+                empty = [c for c in DEBT_NEED_COLS if d.get(c, "") in ("", "—", "-")]
+                if empty:
+                    add("error", f"{did} 需要你判断，但「{'」「'.join(empty)}」没填")
+                    continue
+                if not re.search(r"[？?]", d["问题"]):
+                    add("warn", f"{did} 的「问题」不是问句：{d['问题'][:30]}")
+                opts = _split_options(d["选项"])
+                if len(opts) < 2:
+                    add("error", f"{did} 的「选项」少于 2 个具体答案")
+                elif {o.strip("（()）默认 ") for o in opts} <= {"是", "否", "不是", "没有", "有"}:
+                    add("error", f"{did} 的「选项」只有是/否，要写成具体答案（选了之后规则是什么）")
+
+    refs = code_refs(doc)
+    if refs:
+        eg = "；".join(f"{h['table']}{h['row']}「{h['col']}」{','.join(h['codes'][:2])}" for h in refs[:3])
+        add("error", f"人读列里还有 {len(refs)} 处代号（例：{eg}）——要复述内容或指向需求原文位置")
+    return issues
+
+
+def cmd_check(task_id: str) -> int:
+    doc = parse_md(paths(task_id)["decomp"])
+    issues = check_contract(doc)
+    errs = [i for i in issues if i["level"] == "error"]
+    print(f"契约 v{CONTRACT_VERSION} 检查：{len(errs)} 个错误 / {len(issues) - len(errs)} 个提醒")
+    for i in issues:
+        print(f"  [{'错误' if i['level'] == 'error' else '提醒'}] {i['msg']}")
+    if not issues:
+        print("  ✓ 通过")
+    return 1 if errs else 0
+
+
 def cmd_parse(task_id: str) -> None:
     p = paths(task_id)
     doc = parse_md(p["decomp"])
@@ -435,6 +549,10 @@ def cmd_parse(task_id: str) -> None:
         print(f"  L{h['line']:<4} {h['table']} {h['row']:<6} 「{h['col']}」 {', '.join(h['codes'])}  ← {h['text']}")
     if len(refs) > 40:
         print(f"  …… 另有 {len(refs) - 40} 处")
+    ci = check_contract(doc)
+    ce = [i for i in ci if i["level"] == "error"]
+    print(f"\n契约 v{CONTRACT_VERSION} 检查：{len(ce)} 个错误 / {len(ci) - len(ce)} 个提醒"
+          + ("" if ci else "  ✓") + "（详情：python3 tools/gate_review.py check <task_id>）")
     print("\n前 6 个样本：")
     for it in items[:6]:
         print(f"\n  [{it['uid']}] kind={it['kind']}  DBT={it['dbt']}")
@@ -449,8 +567,10 @@ if __name__ == "__main__":
         print(__doc__)
         sys.exit(1)
     cmd, task = sys.argv[1], sys.argv[2]
-    if cmd == "parse":
+    if cmd in ("parse", "check"):
         try:
+            if cmd == "check":
+                sys.exit(cmd_check(task))
             cmd_parse(task)
         except FileNotFoundError as e:
             print(e)

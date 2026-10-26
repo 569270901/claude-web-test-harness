@@ -50,7 +50,9 @@ harness 文档里反复出现的内部术语，一句话说清。详细规则以
 | GATE 0 | 解构审核：人审 decomp.md 的 7 张表（主要看［需判断］），确认后才生成用例 |
 | GATE 1 | 用例审核：人审 cases.md + flow.md，并在 `exec` 列标出不做自动化的例外 |
 | GATE 2 | 条件触发：test-writing 阶段1 发现实现和 flow.md 有偏差时，人逐条裁决 |
-| 评审控制台 | `python3 tools/qa_console.py serve 8900`，浏览器打开 `http://localhost:8900`，GATE 0 逐条裁决、GATE 1 直接改用例 |
+| 评审控制台 | `python3 tools/qa_console.py ensure 8900`（保证跑的是当前代码），浏览器打开 `http://localhost:8900`，GATE 0 逐条裁决、GATE 1 直接改用例 |
+| 契约版本（contract） | 评审卡片依赖的 decomp.md 格式版本，写在 decomp.md 的 frontmatter。`python3 tools/gate_review.py check <task_id>` 按它核对；不合规时控制台会在待审队列上方亮黄条 |
+| 模板 | `artifacts/templates/decomp.template.md`，decomp.md 格式的唯一出处，agent 起手先复制它 |
 | gate0_verdicts.json | 控制台里 GATE 0 的裁决单；apply 后 decomp.md 状态变成 `gate0_answered` |
 | 增补轮 | test-case-design 在两阶段之间的一次补充派发：把 GATE 0 裁决或新到的证据回填进 decomp.md。不许用来"再想想" |
 

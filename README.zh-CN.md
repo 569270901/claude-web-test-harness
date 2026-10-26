@@ -233,7 +233,9 @@ harness 按你手里有什么自动选打法（A / B / C 档，见 [`artifacts/G
 浏览器打开即可：
 
 ```bash
-python3 tools/qa_console.py            # 单端口，三级导航：版本 → 需求 → 视图（评审 / 执行）
+python3 tools/qa_console.py ensure 8900   # 单端口，三级导航：版本 → 需求 → 视图（评审 / 执行）
+# ensure = 保证 8900 上跑的是当前代码：已是最新就沿用，过期或老进程就替换。更新了 harness 代码后一律用它起控制台，
+# 别直接 serve——控制台是长驻进程，改了文件它不知道；页面顶部会在代码过期时提示你重启
 ```
 
 它给你什么：

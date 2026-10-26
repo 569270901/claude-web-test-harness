@@ -137,6 +137,10 @@ created_at: 2026-06-22T10:30:00Z
 ## Gate 处理
 
 **GATE 0（强制，解构审核）** — 看到 `decomp.md status=pending_review`：
+0. **通知用户之前先验货**：`python3 tools/gate_review.py check <task_id>`。有「错误」就**不要**打扰用户——
+   原样把错误清单发给 test-case-design 重派一次**格式修订**（只改表述、不改结论；不计入 3 次调用上限）。
+   常见错误：解构债清单缺「问题 / 背景 / 选项」列、需判断的债没填三列、人读列里有代号、核心表列名和模板不一致。
+   根因通常是 agent 没按模板写（或这个会话加载的是旧 agent 定义）——模板在 `artifacts/templates/decomp.template.md`。
 1. 在 state.md `human_gates_pending` 加上 `decomp.md@<task_id>`
 2. 通知用户：「请审 `decomp.md` 的 7 张表，直接编辑 cell。**重点六处**：① 表①范围对不对；
    ② 标了 `［需判断］` 的 `🔶推断` 行（认同不动、不对就改）；③ 标了 `［需判断］` 的 `⚠️缺失`
@@ -149,14 +153,19 @@ created_at: 2026-06-22T10:30:00Z
    让用户知道真正要他拍板的有多少处（这个数才是他的工作量）
 3. **启动评审控制台，把链接给用户**（GATE 0 / GATE 1 都适用）：
    ```bash
-   lsof -i :8900 >/dev/null 2>&1 || nohup python3 tools/qa_console.py serve 8900 > /dev/null 2>&1 &
+   python3 tools/qa_console.py ensure 8900
    ```
+   `ensure` 保证 8900 上跑的是**当前磁盘代码**：已是最新就沿用，是过期进程 / 没有版本接口的老进程就替换，
+   端口空闲就启动，被别的程序占着就报错。**不要再用"端口被占用就沿用"**——控制台是长驻进程，
+   启动时把页面和出卡逻辑读进内存，之后改了磁盘上的代码它不知道（只有 decomp.md 这类数据是每次请求重读的）。
+   这条正是一次事故的根因：改进的评审台全都没生效，因为 agent 沿用了三天前启动的老进程。
    对话里给出 `http://localhost:8900`（版本 → 需求 → 视图三级导航）。**禁止只丢一个 decomp.md
    文件路径就让用户审**——控制台把表格 cell 按"待审队列 + 卡片"呈现，只把［需判断］推到用户
-   面前，比读几百行 markdown 便宜得多。端口已被占用时一般无需重启（控制台每次请求都读磁盘文件）。
+   面前，比读几百行 markdown 便宜得多。页面顶部的提示条会在代码过期时提醒重启，标题悬停可看当前版本号。
 4. **停止调度**，等用户回复。用户有两种审法，都要接得住：
    - **直接改 decomp.md 的 cell，回复"确认"** → `decomp.md status=confirmed` → 派 test-case-design（阶段2=生成）
-   - **在控制台逐条裁决并点 apply** → 控制台存快照 `decomp.pre_gate0.md`、写裁决单
+   - **在控制台逐条裁决（选项点一下即存盘），审完回复"审完了"** → 由你执行
+     `python3 tools/gate_review_ui.py apply <task_id>`：存快照 `decomp.pre_gate0.md`、写裁决单
      `gate0_verdicts.json` / `gate0_verdicts.md`，并把 `decomp.md status` 改成 `gate0_answered`
      （表格内容不动——谁的产物谁改）。看到 `gate0_answered`：
      1. 派 test-case-design **增补轮**：读 `gate0_verdicts.json`，把每条裁决回填进 decomp.md

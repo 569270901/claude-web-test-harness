@@ -21,7 +21,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from gate_review import (parse_md, extract_decisions, paths, load_verdicts,  # noqa: E402
+from gate_review import (parse_md, extract_decisions, paths, load_verdicts, check_contract, CONTRACT_VERSION,  # noqa: E402
                          save_verdicts, build_options, MARK_MISS,
                          needs_user_judgment, load_config)
 
@@ -588,6 +588,11 @@ def build_cards(task_id: str) -> dict:
     # 唯一的过滤点：对着用户实际会读到的 question 文案判断，而不是原始表格行
     # （行文本混着来源列/类比说明等噪音，会导致漏判——实锤：33 张卡人工复核只有 8 张
     # 真正需要用户判断，而行级过滤只漏判到 21 张）。
+    # 已结清的债（解构债清单「状态」= answered / verified）不再进队列，也不算「自动搁置」：
+    # 增补轮回填后债被标 answered，但它的问题文字里仍可能带「上线前 / 存量数据」这类关键词，
+    # 按关键词兜底会把已经答完的卡重新塞回评审队列（实锤：回填后队列应为 0，却冒出一张旧卡）
+    cards = [c for c in cards
+             if not re.match(r"\s*(answered|verified)", c.get("debt_status") or "", re.I)]
     all_cards, cards = cards, [c for c in cards if needs_user_judgment(c["kind"], c["_judge"])]
     deferred = [c for c in all_cards if c not in cards]
     for c in all_cards:
@@ -609,6 +614,8 @@ def build_cards(task_id: str) -> dict:
     cards.sort(key=lambda c: (order.get(c["kind"], 9), -c.get("row_count", 0), c["cid"]))
     deferred.sort(key=lambda c: (order.get(c["kind"], 9), c["cid"]))
     return {"frontmatter": doc["frontmatter"], "cards": cards, "deferred": deferred,
+            # 清单是否按当前契约写的：不合规时前端在待审队列上方亮出来，别让评审人对着难读的卡片干猜
+            "contract": {"version": CONTRACT_VERSION, "issues": check_contract(doc)},
             "prd_file": prd_file.name if prd_file else None,
             "prd_total": len(blocks),
             "sections": [{"key": s["key"], "title": s["title"], "header": s["header"],
